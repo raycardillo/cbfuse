@@ -1,0 +1,13 @@
+{
+    "editor.fontFamily": "'Source Code Pro', Menlo, Monaco, 'Courier New', monospace",
+    "editor.fontSize": 14,
+    "files.associations": {
+        "couchbase.h": "c",
+        "cjson.h": "c",
+        "fuse.h": "c",
+        "xxhash.h": "c",
+        "unistd.h": "c",
+        "stdlib.h": "c",
+        "stdbool.h": "c"
+    }
+}
