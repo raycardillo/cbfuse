@@ -32,19 +32,7 @@ static void sync_store_callback(__unused lcb_INSTANCE *instance, __unused int cb
     lcb_STATUS status = lcb_respstore_status(resp);
     result->status = status;
     if (status == LCB_SUCCESS) {
-        // lcb_respget_cas(resp, &result->cas);
-        // lcb_respget_flags(resp, &result->flags);
-        
-        // const char *key, *value;
-        // size_t nkey, nvalue;
-        // lcb_respget_key(resp, &key, &nkey);
-        // lcb_respget_value(resp, &value, &nvalue);
-
-        // // make a copy of the allocated data
-        // result->key = strdup(key);
-        // result->nkey = nkey;
-        // result->value = strdup(value);
-        // result->nvalue = nvalue;
+        // TBD - nothing extra needed currently
     }
 }
 
@@ -59,22 +47,20 @@ lcb_STATUS sync_store(lcb_INSTANCE *instance, lcb_CMDSTORE *cmd, sync_store_resu
     *result = calloc(1, sizeof(sync_store_result));
     rc = lcb_store(instance, *result, cmd);
     if (rc != LCB_SUCCESS) {
-        fprintf(stderr, "sync_store:lcb_store: %s\n", lcb_strerror_short(rc));
+        fprintf(stderr, "  sync_store:lcb_store: %s\n", lcb_strerror_short(rc));
         return rc;
     }
 
     rc = lcb_cmdstore_destroy(cmd);
     rc = lcb_wait(instance, LCB_WAIT_DEFAULT);
 
-    fprintf(stderr, "sync_store:lcb_store completed: %s\n", lcb_strerror_short(rc));
+    fprintf(stderr, "  sync_store:lcb_store completed: %s\n", lcb_strerror_short((*result)->status));
     return rc;
 }
 
 void sync_store_destroy(sync_store_result *result)
 {
     if (result != NULL) {
-        free((void*)result->key);
-        free((void*)result->value);
         free(result);
     }
 }

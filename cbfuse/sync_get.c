@@ -40,7 +40,7 @@ static void sync_get_callback(__unused lcb_INSTANCE *instance, __unused int cbty
         size_t nkey, nvalue;
         lcb_respget_key(resp, &key, &nkey);
         lcb_respget_value(resp, &value, &nvalue);
-        
+
         // make a copy of the allocated data
         result->key = strdup(key);
         result->nkey = nkey;
@@ -60,14 +60,14 @@ lcb_STATUS sync_get(lcb_INSTANCE *instance, lcb_CMDGET *cmd, sync_get_result **r
     *result = calloc(1, sizeof(sync_get_result));
     rc = lcb_get(instance, *result, cmd);
     if (rc != LCB_SUCCESS) {
-        fprintf(stderr, "sync_get:lcb_get: %s\n", lcb_strerror_short(rc));
+        fprintf(stderr, "  sync_get:lcb_get: %s\n", lcb_strerror_short(rc));
         return rc;
     }
 
     rc = lcb_cmdget_destroy(cmd);
     rc = lcb_wait(instance, LCB_WAIT_DEFAULT);
 
-    fprintf(stderr, "sync_get:lcb_get completed: %s %s\n", lcb_strerror_short(rc), (*result)->key);
+    fprintf(stderr, "  sync_get:lcb_get completed: %s %s\n", lcb_strerror_short((*result)->status), (*result)->key);
     return rc;
 }
 

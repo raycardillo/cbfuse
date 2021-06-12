@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef CBFUSE_ATTRIBS_HEADER_SEEN
-#define CBFUSE_ATTRIBS_HEADER_SEEN
+#ifndef CBFUSE_STATS_HEADER_SEEN
+#define CBFUSE_STATS_HEADER_SEEN
 
 #include <libcouchbase/couchbase.h>
 
@@ -33,6 +33,8 @@ typedef struct cbfuse_stat {
 
 extern const size_t CBFUSE_STAT_STRUCT_SIZE;
 
-int insert_attrib(lcb_INSTANCE *instance, const char *pkey, mode_t mode);
+int get_stat(lcb_INSTANCE *instance, const char *pkey, cbfuse_stat *stat, uint64_t *cas);
+int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode);
+int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size);
 
-#endif /* !CBFUSE_ATTRIBS_HEADER_SEEN */
+#endif /* !CBFUSE_STATS_HEADER_SEEN */

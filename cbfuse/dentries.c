@@ -25,7 +25,56 @@
 #include "sync_get.h"
 #include "sync_store.h"
 
-char *create_dentry(const char *current_pkey, const char *parent_pkey, const char *child_pkeys[], int child_nkeys)
+int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_json)
+{
+    int fresult = 0;
+    sync_get_result *result = NULL;
+
+    lcb_STATUS rc;
+    lcb_CMDGET *cmd;
+
+    rc = lcb_cmdget_create(&cmd);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdget_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        DENTRIES_COLLECTION_STRING, DENTRIES_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdget_key(cmd, pkey, strlen(pkey));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_get(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
+
+    *dentry_json = cJSON_ParseWithLength(result->value, result->nvalue);
+    IfNULLGotoDoneWithRef(dentry_json, -EIO, pkey);
+
+done:
+    // free the result
+    sync_get_destroy(result);
+
+    return fresult;
+}
+
+// directory entries are mostly used by readdir
+// represented as JSON because it's mostly dynamic character data
+// note that the path-key may not be the full path
+// {
+//   "cr": "current-dir-path-key",
+//   "pr": "parent-dir-path-key",
+//   "ch": [
+//     "some-child-dir-path-key",
+//     "other-child-dir-path-key"
+//   ]
+// }
+static char *create_dentry(const char *current_pkey, const char *parent_pkey, const char *child_pkeys[], int child_nkeys)
 {
     char *dentry_string = NULL;
     cJSON *dentry_json = cJSON_CreateObject();
@@ -59,45 +108,6 @@ char *create_dentry(const char *current_pkey, const char *parent_pkey, const cha
 done:
     cJSON_Delete(dentry_json);
     return dentry_string;
-}
-
-int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_json)
-{
-    int fresult = 0;
-    sync_get_result *result = NULL;
-
-    lcb_STATUS rc;
-    lcb_CMDGET *cmd;
-
-    rc = lcb_cmdget_create(&cmd);
-    IfLCBFailGotoDone(rc, -EIO);
-
-    rc = lcb_cmdget_collection(
-        cmd,
-        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
-        DENTRIES_COLLECTION_STRING, DENTRIES_COLLECTION_STRLEN);
-    IfLCBFailGotoDone(rc, -EIO);
-
-    rc = lcb_cmdget_key(cmd, pkey, strlen(pkey));
-    IfLCBFailGotoDone(rc, -EIO);
-
-    rc = sync_get(instance, cmd, &result);
-    IfLCBFailGotoDone(rc, -EIO);
-
-    // first check the command result code
-    IfLCBFailGotoDone(rc, -EIO);
-
-    // now check the actual result status
-    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
-
-    *dentry_json = cJSON_ParseWithLength(result->value, result->nvalue);
-    IfNULLGotoDoneWithRef(dentry_json, -EIO, pkey);
-
-done:
-    // free the result
-    sync_get_destroy(result);
-
-    return fresult;
 }
 
 int add_child_to_dentry(lcb_INSTANCE *instance, const char *pkey, const char *child_pkey)
@@ -143,7 +153,12 @@ int add_child_to_dentry(lcb_INSTANCE *instance, const char *pkey, const char *ch
 
     sync_store_result *result = NULL;
     rc = sync_store(instance, cmd, &result);
+
+    // first check the sync command result code
     IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
 
 done:
     return fresult;
@@ -185,7 +200,12 @@ int insert_root_dentry(lcb_INSTANCE *instance)
 
     sync_store_result *result = NULL;
     rc = sync_store(instance, cmd, &result);
+
+    // first check the sync command result code
     IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, ROOT_DIR_STRING);
 
 done:
     return fresult;

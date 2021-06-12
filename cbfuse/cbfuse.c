@@ -27,12 +27,13 @@
 #include <xxhash.h>
 #include <fuse.h>
 
-#include "sync_get.h"
-#include "sync_store.h"
-#include "attribs.h"
-#include "dentries.h"
 #include "util.h"
 #include "common.h"
+#include "sync_get.h"
+#include "sync_store.h"
+#include "stats.h"
+#include "dentries.h"
+#include "data.h"
 
 // IMPORTANT:
 // When running, use the '-s' option to force single-threaded operation for now
@@ -61,11 +62,14 @@ static void open_callback(__unused lcb_INSTANCE *instance, lcb_STATUS rc)
 static void *cb_init(__unused struct fuse_conn_info *conn)
 {
     conn->async_read = false;
+    conn->want = FUSE_CAP_BIG_WRITES;
     return NULL;
 }
 
 static int cb_getattr(const char *path, struct stat *stbuf)
 {
+    fprintf(stderr, "cb_getattr path:%s\n", path);
+
     int fresult = 0;
     sync_get_result *result = NULL;
 
@@ -78,27 +82,25 @@ static int cb_getattr(const char *path, struct stat *stbuf)
     rc = lcb_cmdget_collection(
         cmd,
         DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
-        ATTRIBS_COLLECTION_STRING, ATTRIBS_COLLECTION_STRLEN);
+        STATS_COLLECTION_STRING, STATS_COLLECTION_STRLEN);
     IfLCBFailGotoDone(rc, -EIO);
 
-    rc = lcb_cmdget_key(cmd, path, strlen(path));
+    size_t npath = strlen(path);
+    IfTrueGotoDoneWithRef((npath > MAX_PATH_LEN), ENAMETOOLONG, path);
+
+    rc = lcb_cmdget_key(cmd, path, npath);
     IfLCBFailGotoDone(rc, -EIO);
 
     rc = sync_get(_thread_instance, cmd, &result);
-    IfLCBFailGotoDone(rc, -EIO);
 
-    // first check the command result code
+    // first check the sync command result code
     IfLCBFailGotoDone(rc, -EIO);
 
     // now check the actual result status
     IfLCBFailGotoDoneWithRef(result->status, -ENOENT, path);
 
     // sanity check that we received the expected structure
-    if (result->nvalue != CBFUSE_STAT_STRUCT_SIZE) {
-        fprintf(stderr, "cb_getattr:nvalue %lu != %lu\n", result->nvalue, CBFUSE_STAT_STRUCT_SIZE);
-        fresult = -EBADF;
-        goto done;
-    }
+    IfTrueGotoDoneWithRef((result->nvalue != CBFUSE_STAT_STRUCT_SIZE), -EBADF, path);
 
     // copy the stat binary into the stat buffer
     cbfuse_stat *stres = (cbfuse_stat*)result->value;
@@ -113,6 +115,8 @@ static int cb_getattr(const char *path, struct stat *stbuf)
     stbuf->st_ctimensec = stres->st_ctimensec;
     stbuf->st_size = stres->st_size;
 
+    fprintf(stderr, "%s:%s:%d %s size:%lld\n", __FILENAME__, __func__, __LINE__, path, stbuf->st_size);
+
 done:
     // free the result
     sync_get_destroy(result);
@@ -122,60 +126,29 @@ done:
 
 static int cb_open(const char *path, struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_open:path: %s %0x\n", path, fi->flags);
+    fprintf(stderr, "cb_open path:%s flags:0x%04x\n", path, fi->flags);
+    
+    int fresult = 0;
 
-    char *dirstr = strdup(path);
-    //char *basestr = strdup(path);
-    char *dname = dirname(dirstr);
-    //char *bname = basename(basestr);
+    size_t npath = strlen(path);
+    IfTrueGotoDoneWithRef((npath > MAX_PATH_LEN), ENAMETOOLONG, path);
 
-    // TODO: reorg all returns and be sure to free memory
+    cbfuse_stat stat = {0};
+    fresult = get_stat(_thread_instance, path, &stat, NULL);
+    IfFRFailGotoDoneWithRef(path);
 
-    if (strcmp(dname, ROOT_DIR_STRING) != 0) {
-        // We only recognize one file.
-        return -ENOENT;
-    }
-
-    if ((fi->flags & O_ACCMODE) != O_RDONLY) {
-        // Only reading allowed.
-        return -EACCES;
-    }
-
-    lcb_STATUS rc;
-    lcb_CMDGET *cmd;
-    const char *scope = NULL;
-    size_t scope_len = 0;
-    const char *collection = "inodes";
-    size_t collection_len = strlen(collection);
-    sync_get_result *result = NULL;
-    rc = lcb_cmdget_create(&cmd);
-    if (rc != LCB_SUCCESS) {
-        //fprintf(stderr, "lcb_cmdget_create: %s\n", lcb_strerror_short(rc));
-        return rc;
-    }
-    rc = lcb_cmdget_collection(cmd, scope, scope_len, collection, collection_len);
-    if (rc != LCB_SUCCESS) {
-        //fprintf(stderr, "lcb_cmdget_collection: %s\n", lcb_strerror_short(rc));
-        return rc;
-    }
-    rc = lcb_cmdget_key(cmd, "1234", strlen("1234"));
-    if (rc != LCB_SUCCESS) {
-        //fprintf(stderr, "lcb_cmdget_key: %s\n", lcb_strerror_short(rc));
-        return rc;
-    }
-
-    rc = sync_get(_thread_instance, cmd, &result);
-
-    fi->fh = (uint64_t)result;
-
-    return 0;
+done:
+    return fresult;
 }
 
 static int cb_create(const char *path, mode_t mode, __unused struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_create:path: %s %0x\n", path, mode);
+    fprintf(stderr, "cb_create path:%s mode:0x%02x\n", path, mode);
 
     int fresult = 0;
+
+    size_t npath = strlen(path);
+    IfTrueGotoDoneWithRef((npath > MAX_PATH_LEN), ENAMETOOLONG, path);
 
     char *dirstr = strdup(path);
     char *basestr = strdup(path);
@@ -194,7 +167,7 @@ static int cb_create(const char *path, mode_t mode, __unused struct fuse_file_in
         path
     );
 
-    fresult = insert_attrib(_thread_instance, path, (S_IFREG | 0755));
+    fresult = insert_stat(_thread_instance, path, mode);
     IfFRFailGotoDoneWithRef(path);
 
     fresult = add_child_to_dentry(_thread_instance, dname, bname);
@@ -204,40 +177,53 @@ done:
     return fresult;
 }
 
-static int cb_readdir(const char *path, void *buf, fuse_fill_dir_t filler, __unused off_t offset, __unused struct fuse_file_info *fi)
+static int cb_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, __unused struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_readdir:path: %s\n", path);
+    fprintf(stderr, "cb_readdir path:%s\n", path);
 
-    if (strcmp(path, ROOT_DIR_STRING) != 0) {
-        // We only recognize the root directory.
-        return -ENOENT;
+    cJSON *dentry_json = NULL;
+    int fresult = get_dentry_json(_thread_instance, path, &dentry_json);
+    IfFRFailGotoDoneWithRef(path);
+
+    int child_offset = 0;
+    cJSON *child;
+    cJSON *children = cJSON_GetObjectItemCaseSensitive(dentry_json, DENTRY_CHILDREN);
+    IfFalseGotoDoneWithRef(cJSON_IsArray(children), 0, path);
+
+    cJSON_ArrayForEach(child, children) {
+        // skip to the offset (underlying implementation is a linked list)
+        if (child_offset++ >= offset) {
+            // fill with the next offset or zero if no more
+            IfFalseGotoDoneWithRef(cJSON_IsString(child), 0, path);
+            fresult = filler(buf, cJSON_GetStringValue(child), NULL, child_offset);
+        }
     }
 
-    filler(buf, ".", NULL, 0);      // Current directory (.)
-    filler(buf, "..", NULL, 0);     // Parent directory (..)
-    // filler(buf, file_path + 1, NULL, 0);
-
-    return 0;
+done:
+    cJSON_Delete(dentry_json);
+    return fresult;
 }
 
 static int cb_read(const char *path, char *buf, size_t size, off_t offset, __unused struct fuse_file_info *fi)
 {
-    sync_get_result *result = (sync_get_result*)fi->fh;
+    fprintf(stderr, "cb_read path:%s size:%lu offset:%llu\n", path, size, offset);
 
-    char *file_path = "replace_me";
-    if (strcmp(path, file_path) != 0)
-        return -ENOENT;
-    
-    size_t file_size = result->nvalue;
-    if (offset >= (off_t)file_size) /* Trying to read past the end of file. */
-        return 0;
+    int fresult = read_data(_thread_instance, path, buf, size, offset);
+    IfFRFailGotoDoneWithRef(path);
 
-    if (offset + size > file_size) /* Trim the read to the file size. */
-        size = file_size - offset;
+done:
+    return fresult;
+}
 
-    memcpy(buf, result->value + offset, size); /* Provide the content. */
+static int cb_write(const char *path, const char *buf, size_t size, off_t offset, __unused struct fuse_file_info *fi)
+{
+    fprintf(stderr, "cb_write path:%s size:%lu offset:%llu\n", path, size, offset);
 
-    return size;
+    int fresult = write_data(_thread_instance, path, buf, size, offset);
+    IfFRFailGotoDoneWithRef(path);
+
+done:
+    return fresult;
 }
 
 /////
@@ -245,8 +231,8 @@ static int cb_read(const char *path, char *buf, size_t size, off_t offset, __unu
 static int insert_root(lcb_INSTANCE *instance) {
     // TODO: Consider refactoring to C++ to take advantage of transaction context with multiple ops
 
-    // add root attrib as directory with 0x755 permissions
-    int fresult = insert_attrib(instance, ROOT_DIR_STRING, (S_IFDIR | 0755));
+    // add root stat as directory with 0x755 permissions
+    int fresult = insert_stat(instance, ROOT_DIR_STRING, (S_IFDIR | 0755));
     IfFRFailGotoDoneWithRef(ROOT_DIR_STRING);
 
     fresult = insert_root_dentry(instance);
@@ -265,6 +251,7 @@ static struct fuse_operations cb_filesystem_operations = {
     .create  = cb_create,
     .read    = cb_read,
     .readdir = cb_readdir,
+    .write   = cb_write,
 };
 
 __unused
@@ -363,7 +350,7 @@ int main(int argc, char **argv)
     if (get_root_rc == 0) {
         if (!S_ISDIR(root_stat.st_mode)) {
             // we received something but it's not a directory
-            fprintf(stderr, "Unexpected root directory detected. st_mode=0x%0x\n", root_stat.st_mode);
+            fprintf(stderr, "Unexpected root directory detected. st_mode=0x%02x\n", root_stat.st_mode);
             exit(EXIT_FAILURE);
         }
     } else if (get_root_rc == -ENOENT) {

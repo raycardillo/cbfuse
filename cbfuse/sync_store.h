@@ -22,10 +22,6 @@
 typedef struct
 sync_store_result {
     lcb_STATUS status;
-    const char *key, *value;
-    size_t nkey, nvalue;
-    uint64_t cas;
-    uint32_t flags;
 } sync_store_result;          // contains the results of the operation
 
 /**

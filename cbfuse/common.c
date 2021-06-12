@@ -16,17 +16,27 @@
 
 #include "common.h"
 
+const size_t  MAX_KEY_LEN                    = 250;
+const size_t  MAX_DOC_LEN                    = 20 * 1024 * 1024;
+
+const size_t  MAX_PATH_LEN                   = MAX_KEY_LEN;
+const size_t  MAX_FILE_BLOCKS                = 256;
+const size_t  MAX_FILE_LEN                   = MAX_FILE_BLOCKS * MAX_DOC_LEN;
+
 const char   *DEFAULT_SCOPE_STRING           = NULL;
 const size_t  DEFAULT_SCOPE_STRLEN           = 0;
 
 const char    ROOT_DIR_STRING[]              = "/";
 const size_t  ROOT_DIR_STRLEN                = sizeof(ROOT_DIR_STRING)-1;
 
-const char    ATTRIBS_COLLECTION_STRING[]    = "attribs";
-const size_t  ATTRIBS_COLLECTION_STRLEN      = sizeof(ATTRIBS_COLLECTION_STRING)-1;
+const char    STATS_COLLECTION_STRING[]      = "stats";
+const size_t  STATS_COLLECTION_STRLEN        = sizeof(STATS_COLLECTION_STRING)-1;
 
 const char    DENTRIES_COLLECTION_STRING[]   = "dentries";
 const size_t  DENTRIES_COLLECTION_STRLEN     = sizeof(DENTRIES_COLLECTION_STRING)-1;
+
+const char    BLOCKS_COLLECTION_STRING[]     = "blocks";
+const size_t  BLOCKS_COLLECTION_STRLEN       = sizeof(BLOCKS_COLLECTION_STRING)-1;
 
 const char    DENTRY_CURRENT[]    = "cr";
 const char    DENTRY_PARENT[]     = "pr";

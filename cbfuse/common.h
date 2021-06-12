@@ -19,17 +19,26 @@
 
 #include <stdlib.h>
 
+extern const size_t  MAX_KEY_LEN;
+extern const size_t  MAX_DOC_LEN;
+extern const size_t  MAX_PATH_LEN;
+extern const size_t  MAX_FILE_BLOCKS;
+extern const size_t  MAX_FILE_LEN;
+
 extern const char   *DEFAULT_SCOPE_STRING;
 extern const size_t  DEFAULT_SCOPE_STRLEN;
 
 extern const char    ROOT_DIR_STRING[];
 extern const size_t  ROOT_DIR_STRLEN;
 
-extern const char    ATTRIBS_COLLECTION_STRING[];
-extern const size_t  ATTRIBS_COLLECTION_STRLEN;
+extern const char    STATS_COLLECTION_STRING[];
+extern const size_t  STATS_COLLECTION_STRLEN;
 
 extern const char    DENTRIES_COLLECTION_STRING[];
 extern const size_t  DENTRIES_COLLECTION_STRLEN;
+
+extern const char    BLOCKS_COLLECTION_STRING[];
+extern const size_t  BLOCKS_COLLECTION_STRLEN;
 
 extern const char    DENTRY_CURRENT[];
 extern const char    DENTRY_PARENT[];

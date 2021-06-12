@@ -14,14 +14,12 @@
  * limitations under the License.
  */
 
-#ifndef CBFUSE_DENTRIES_HEADER_SEEN
-#define CBFUSE_DENTRIES_HEADER_SEEN
+#ifndef CBFUSE_BLOCKS_HEADER_SEEN
+#define CBFUSE_BLOCKS_HEADER_SEEN
 
 #include <libcouchbase/couchbase.h>
-#include <cjson/cJSON.h>
 
-int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_json);
-int add_child_to_dentry(lcb_INSTANCE *instance, const char *pkey, const char *child_pkey);
-int insert_root_dentry(lcb_INSTANCE *instance);
+int read_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t nbuf, off_t offset);
+int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t nbuf, off_t offset);
 
-#endif /* !CBFUSE_DENTRIES_HEADER_SEEN */
+#endif /* !CBFUSE_BLOCKS_HEADER_SEEN */

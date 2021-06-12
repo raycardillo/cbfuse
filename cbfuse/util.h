@@ -27,28 +27,28 @@
 // crazy nested indentations when multiple conditions can fail.
 #define IfLCBFailGotoDone(rc, fr) \
 if ((rc) != LCB_SUCCESS) { \
-  fprintf(stderr, "%s:%s:%d %s\n", __FILENAME__, __func__, __LINE__, lcb_strerror_short(rc)); \
+  fprintf(stderr, "  %s:%s:%d LCB_FAIL %s\n", __FILENAME__, __func__, __LINE__, lcb_strerror_short(rc)); \
   fresult = fr; \
   goto done; \
 }
 
 #define IfLCBFailGotoDoneWithRef(rc, fr, ref) \
 if ((rc) != LCB_SUCCESS) { \
-  fprintf(stderr, "%s:%s:%d %s %s\n", __FILENAME__, __func__, __LINE__, ref, lcb_strerror_short(rc)); \
+  fprintf(stderr, "  %s:%s:%d LCB_FAIL %s %s\n", __FILENAME__, __func__, __LINE__, ref, lcb_strerror_short(rc)); \
   fresult = fr; \
   goto done; \
 }
 
 #define IfNULLGotoDoneWithRef(val, fr, ref) \
 if ((val) == NULL) { \
-  fprintf(stderr, "%s:%s:%d %s\n", __FILENAME__, __func__, __LINE__, ref); \
+  fprintf(stderr, "  %s:%s:%d TEST_NULL %s\n", __FILENAME__, __func__, __LINE__, ref); \
   fresult = fr; \
   goto done; \
 }
 
 #define IfTrueGotoDoneWithRef(val, fr, ref) \
 if (val) { \
-  fprintf(stderr, "%s:%s:%d %s\n", __FILENAME__, __func__, __LINE__, ref); \
+  fprintf(stderr, "  %s:%s:%d TEST_BOOL %s\n", __FILENAME__, __func__, __LINE__, ref); \
   fresult = fr; \
   goto done; \
 }
@@ -57,17 +57,22 @@ if (val) { \
 
 #define IfFRFailGotoDoneWithRef(ref) \
 if (fresult != 0) { \
-  fprintf(stderr, "%s:%s:%d %s\n", __FILENAME__, __func__, __LINE__, ref); \
+  fprintf(stderr, "  %s:%s:%d FR_FAIL (%d)(%s) %s\n", __FILENAME__, __func__, __LINE__, fresult, strerror(-fresult), ref); \
   goto done; \
 }
 
-inline void *memdup(const void *src, size_t n)
+static inline void *memdupm(const void *src, size_t n, size_t m)
 {
-    void *dest = malloc(n);
+    void *dest = malloc(m);
     if (dest == NULL) {
         return NULL;
     }
     return memcpy(dest, src, n);
+}
+
+static inline void *memdup(const void *src, size_t n)
+{
+  return memdupm(src, n, n);
 }
 
 #endif /* !CBFUSE_UTIL_HEADER_SEEN */

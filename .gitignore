@@ -2,6 +2,7 @@
 *.a
 *.dylib
 *.o
+*.log
 
 .DS_Store
 /build

@@ -18,8 +18,9 @@ add_executable(cbfuse
   common.c
   sync_get.c
   sync_store.c
-  attribs.c
+  stats.c
   dentries.c
+  data.c
   cbfuse.c
 )
 
