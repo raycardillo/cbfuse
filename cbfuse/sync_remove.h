@@ -14,40 +14,40 @@
  * limitations under the License.
  */
 
-#ifndef CBFUSE_SYNC_STORE_HEADER_SEEN
-#define CBFUSE_SYNC_STORE_HEADER_SEEN
+#ifndef CBFUSE_SYNC_REMOVE_HEADER_SEEN
+#define CBFUSE_SYNC_REMOVE_HEADER_SEEN
 
 #include <libcouchbase/couchbase.h>
 
 typedef struct
-sync_store_result {
+sync_remove_result {
     lcb_STATUS status;
-} sync_store_result; // contains the results of the operation
+} sync_remove_result; // contains the results of the operation
 
 /**
  * Initializes the synchronous helper by installing the required callback.
  *
  * @param instance  the library instance to use
  */
-void sync_store_init(lcb_INSTANCE *instance);
+void sync_remove_init(lcb_INSTANCE *instance);
 
 /**
- * Perform a synchronous store operation and return the result.
+ * Perform a synchronous remove operation and return the result.
  * 
  * For convenience, the command will be destraoyed after it is used.
  * 
  * @param instance  library instance to use
- * @param cmd       specific store command to call
- * @param result    results from the store operation 
+ * @param cmd       specific remove command to call
+ * @param result    results from the remove operation 
  * @return status code of the synchronous operation
  */
-lcb_STATUS sync_store(lcb_INSTANCE *instance, lcb_CMDSTORE *cmd, sync_store_result **result);
+lcb_STATUS sync_remove(lcb_INSTANCE *instance, lcb_CMDREMOVE *cmd, sync_remove_result **result);
 
 /**
  * Frees the memory that was used to provide results.
  *
  * @param result    result memory to destroy
  */
-void sync_store_destroy(sync_store_result *result);
+void sync_remove_destroy(sync_remove_result *result);
 
-#endif /* !CBFUSE_SYNC_STORE_HEADER_SEEN */
+#endif /* !CBFUSE_SYNC_REMOVE_HEADER_SEEN */

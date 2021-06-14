@@ -67,7 +67,6 @@ lcb_STATUS sync_get(lcb_INSTANCE *instance, lcb_CMDGET *cmd, sync_get_result **r
     rc = lcb_cmdget_destroy(cmd);
     rc = lcb_wait(instance, LCB_WAIT_DEFAULT);
 
-    fprintf(stderr, "  sync_get:lcb_get completed: %s %s\n", lcb_strerror_short((*result)->status), (*result)->key);
     return rc;
 }
 

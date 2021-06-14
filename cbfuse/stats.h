@@ -35,6 +35,8 @@ extern const size_t CBFUSE_STAT_STRUCT_SIZE;
 
 int get_stat(lcb_INSTANCE *instance, const char *pkey, cbfuse_stat *stat, uint64_t *cas);
 int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode);
+int remove_stat(lcb_INSTANCE *instance, const char *pkey);
+int update_stat_atime(lcb_INSTANCE *instance, const char *pkey);
 int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size);
 
 #endif /* !CBFUSE_STATS_HEADER_SEEN */

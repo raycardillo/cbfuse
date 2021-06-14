@@ -17,7 +17,9 @@ if (NOT DEFINED LIB_INSTALL_DIR)
   set (LIB_INSTALL_DIR lib)
 endif ()
 
-SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wshadow")
+
+include(sanitizers)
 
 project( cbfuse VERSION 0.1 LANGUAGES C )
 

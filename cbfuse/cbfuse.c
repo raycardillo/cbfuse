@@ -31,6 +31,7 @@
 #include "common.h"
 #include "sync_get.h"
 #include "sync_store.h"
+#include "sync_remove.h"
 #include "stats.h"
 #include "dentries.h"
 #include "data.h"
@@ -46,7 +47,7 @@ _Thread_local lcb_INSTANCE *_thread_instance;
 
 static void die(__unused lcb_INSTANCE *instance, const char *msg, lcb_STATUS err)
 {
-    fprintf(stderr, "%s. Received code 0x%X (%s)\n", msg, err, lcb_strerror_short(err));
+    fprintf(stderr, "%s. (%s)\n", msg, lcb_strerror_short(err));
     exit(EXIT_FAILURE);
 }
 
@@ -118,9 +119,7 @@ static int cb_getattr(const char *path, struct stat *stbuf)
     fprintf(stderr, "%s:%s:%d %s size:%lld\n", __FILENAME__, __func__, __LINE__, path, stbuf->st_size);
 
 done:
-    // free the result
     sync_get_destroy(result);
-
     return fresult;
 }
 
@@ -171,6 +170,29 @@ static int cb_create(const char *path, mode_t mode, __unused struct fuse_file_in
     IfFRFailGotoDoneWithRef(path);
 
     fresult = add_child_to_dentry(_thread_instance, dname, bname);
+    IfFRFailGotoDoneWithRef(path);
+
+done:
+    return fresult;
+}
+
+static int cb_unlink(const char *path)
+{
+    fprintf(stderr, "cb_unlink path:%s\n", path);
+
+    int fresult = 0;
+
+    char *dirstr = strdup(path);
+    char *basestr = strdup(path);
+    char *dname = dirname(dirstr);
+    char *bname = basename(basestr);
+
+    // TODO: These operations can be in a transaction or at least scheduled as a batch
+
+    // Only check the stat operation - others can fail silently and may be useful for error recovery
+    fresult = remove_data(_thread_instance, path);
+    fresult = remove_child_from_dentry(_thread_instance, dname, bname);
+    fresult = remove_stat(_thread_instance, path);
     IfFRFailGotoDoneWithRef(path);
 
 done:
@@ -249,6 +271,7 @@ static struct fuse_operations cb_filesystem_operations = {
     .getattr = cb_getattr,
     .open    = cb_open,
     .create  = cb_create,
+    .unlink  = cb_unlink,
     .read    = cb_read,
     .readdir = cb_readdir,
     .write   = cb_write,
@@ -326,13 +349,14 @@ int main(int argc, char **argv)
 
     rc = lcb_get_bootstrap_status(_thread_instance);
     if (rc != LCB_SUCCESS) {
-        die(_thread_instance, "Couldn't bootstrap connection", rc);
+        die(_thread_instance, "Couldn't bootstrap connection (make sure server is running)", rc);
     }
 
     // install callbacks for the initialized instance
     lcb_set_open_callback(_thread_instance, open_callback);
     sync_get_init(_thread_instance);
     sync_store_init(_thread_instance);
+    sync_remove_init(_thread_instance);
 
     const char *bucket = "cbfuse";
     rc = lcb_open(_thread_instance, bucket, strlen(bucket)),

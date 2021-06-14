@@ -20,8 +20,9 @@
 #include <libcouchbase/couchbase.h>
 #include <cjson/cJSON.h>
 
+int insert_root_dentry(lcb_INSTANCE *instance);
 int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_json);
 int add_child_to_dentry(lcb_INSTANCE *instance, const char *pkey, const char *child_pkey);
-int insert_root_dentry(lcb_INSTANCE *instance);
+int remove_child_from_dentry(lcb_INSTANCE *instance, const char *pkey, const char *child_pkey);
 
 #endif /* !CBFUSE_DENTRIES_HEADER_SEEN */

@@ -1,9 +1,0 @@
-UPSERT INTO `cbfuse`._default.dentries (KEY, VALUE)
-  VALUES (
-  "/",
-  {
-    "n": "/",
-    "p": null,
-    "c": []
-  }
-  );

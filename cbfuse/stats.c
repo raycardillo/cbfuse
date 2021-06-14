@@ -24,6 +24,7 @@
 #include "common.h"
 #include "sync_get.h"
 #include "sync_store.h"
+#include "sync_remove.h"
 
 const size_t CBFUSE_STAT_STRUCT_SIZE = sizeof(cbfuse_stat);
 
@@ -67,9 +68,7 @@ int get_stat(lcb_INSTANCE *instance, const char *pkey, cbfuse_stat *stat, uint64
     fprintf(stderr, "%s:%s:%d %s size:%lld\n", __FILENAME__, __func__, __LINE__, pkey, stat->st_size);
 
 done:
-    // free the result
     sync_get_destroy(result);
-
     return fresult;
 }
 
@@ -77,6 +76,7 @@ int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode)
 {
     int fresult = 0;
     cbfuse_stat root_stat = {0};
+    sync_store_result *result = NULL;
 
     // get the current time to update file times
     struct timespec ts;
@@ -94,7 +94,7 @@ int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode)
     root_stat.st_ctime = ts.tv_sec;
     root_stat.st_ctimensec = ts.tv_nsec;
 
-    // now write the stat back to Couchbase
+    // now write the stat data to Couchbase
 
     lcb_STATUS rc;
     lcb_CMDSTORE *cmd;
@@ -118,7 +118,6 @@ int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode)
     rc = lcb_cmdstore_value(cmd, (char*)&root_stat, CBFUSE_STAT_STRUCT_SIZE);
     IfLCBFailGotoDone(rc, -EIO);
 
-    sync_store_result *result = NULL;
     rc = sync_store(instance, cmd, &result);
 
     // first check the sync command result code
@@ -128,6 +127,105 @@ int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode)
     IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
 
 done:
+    sync_store_destroy(result);
+    return fresult;
+}
+
+int remove_stat(lcb_INSTANCE *instance, const char *pkey)
+{
+    int fresult = 0;
+    sync_remove_result *result = NULL;
+
+    lcb_STATUS rc;
+    lcb_CMDREMOVE *cmd;
+
+    // insert only if key doesn't already exist
+    rc = lcb_cmdremove_create(&cmd);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdremove_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        STATS_COLLECTION_STRING, STATS_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdremove_key(cmd, pkey, strlen(pkey));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_remove(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
+
+done:
+    sync_remove_destroy(result);
+    return fresult;
+}
+
+int update_stat_atime(lcb_INSTANCE *instance, const char *pkey)
+{
+    int fresult = 0;
+    cbfuse_stat stat = {0};
+    sync_store_result *result = NULL;
+
+    // get the current stat
+    uint64_t cas = 0;
+    fresult = get_stat(instance, pkey, &stat, &cas);
+    IfFRFailGotoDoneWithRef(pkey);
+
+    // get the current time to update modified time
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+        fresult = -EIO;
+        goto done;
+    }
+
+    // update the stat struct
+    stat.st_atime = ts.tv_sec;
+    stat.st_atimensec = ts.tv_nsec;
+
+    // now write the stat back to Couchbase
+
+    lcb_STATUS rc;
+    lcb_CMDSTORE *cmd;
+
+    // update the stat entry with the new version
+    rc = lcb_cmdstore_create(&cmd, LCB_STORE_REPLACE);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        STATS_COLLECTION_STRING, STATS_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_datatype(cmd, LCB_VALUE_RAW);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_cas(cmd, cas);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_key(cmd, pkey, strlen(pkey));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_value(cmd, (char*)&stat, CBFUSE_STAT_STRUCT_SIZE);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_store(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
+
+    // TODO: retry if fail due to CAS (could also considering locking semantics with CAS to prevent this
+
+done:
+    sync_store_destroy(result);
     return fresult;
 }
 
@@ -135,6 +233,7 @@ int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size)
 {
     int fresult = 0;
     cbfuse_stat stat = {0};
+    sync_store_result *result = NULL;
 
     // get the current stat
     uint64_t cas = 0;
@@ -180,7 +279,6 @@ int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size)
     rc = lcb_cmdstore_value(cmd, (char*)&stat, CBFUSE_STAT_STRUCT_SIZE);
     IfLCBFailGotoDone(rc, -EIO);
 
-    sync_store_result *result = NULL;
     rc = sync_store(instance, cmd, &result);
 
     // first check the sync command result code
@@ -192,5 +290,6 @@ int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size)
     // TODO: retry if fail due to CAS (could also considering locking semantics with CAS to prevent this
 
 done:
+    sync_store_destroy(result);
     return fresult;
 }

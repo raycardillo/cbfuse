@@ -24,6 +24,7 @@
 #include "common.h"
 #include "sync_get.h"
 #include "sync_store.h"
+#include "sync_remove.h"
 
 int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_json)
 {
@@ -57,9 +58,7 @@ int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_jso
     IfNULLGotoDoneWithRef(dentry_json, -EIO, pkey);
 
 done:
-    // free the result
     sync_get_destroy(result);
-
     return fresult;
 }
 
@@ -110,14 +109,64 @@ done:
     return dentry_string;
 }
 
+int insert_root_dentry(lcb_INSTANCE *instance)
+{
+    int fresult = 0;
+    sync_store_result *result = NULL;
+
+    const char *dentry = create_dentry(
+        ROOT_DIR_STRING,
+        ROOT_DIR_STRING,
+        NULL,
+        0
+    );
+    if (dentry == NULL) {
+        fprintf(stderr, "%s:%s:%d Failed to create ROOT dentry JSON.\n", __FILENAME__, __func__, __LINE__);
+        goto done;
+    }
+
+    lcb_STATUS rc;
+    lcb_CMDSTORE *cmd;
+
+    // insert only if key doesn't already exist
+    rc = lcb_cmdstore_create(&cmd, LCB_STORE_INSERT);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        DENTRIES_COLLECTION_STRING, DENTRIES_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_key(cmd, ROOT_DIR_STRING, ROOT_DIR_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_value(cmd, dentry, strlen(dentry));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_store(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, ROOT_DIR_STRING);
+
+done:
+    sync_store_destroy(result);
+    return fresult;
+}
+
 int add_child_to_dentry(lcb_INSTANCE *instance, const char *pkey, const char *child_pkey)
 {
+    sync_store_result *result = NULL;
+
     cJSON *dentry_json = NULL;
     int fresult = get_dentry_json(instance, pkey, &dentry_json);
     if (fresult != 0) {
         return fresult;
     }
-
+    
     cJSON *children_json = cJSON_GetObjectItemCaseSensitive(dentry_json, DENTRY_CHILDREN);
     IfNULLGotoDoneWithRef(dentry_json, -EIO, pkey);
 
@@ -151,7 +200,6 @@ int add_child_to_dentry(lcb_INSTANCE *instance, const char *pkey, const char *ch
     rc = lcb_cmdstore_value(cmd, dentry_string, strlen(dentry_string));
     IfLCBFailGotoDone(rc, -EIO);
 
-    sync_store_result *result = NULL;
     rc = sync_store(instance, cmd, &result);
 
     // first check the sync command result code
@@ -161,29 +209,53 @@ int add_child_to_dentry(lcb_INSTANCE *instance, const char *pkey, const char *ch
     IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
 
 done:
+    cJSON_Delete(dentry_json);
+    sync_store_destroy(result);
     return fresult;
 }
 
-int insert_root_dentry(lcb_INSTANCE *instance)
+int remove_child_from_dentry(__unused lcb_INSTANCE *instance, __unused const char *pkey, __unused const char *child_pkey)
 {
-    int fresult = 0;
+    sync_store_result *result = NULL;
 
-    const char *dentry = create_dentry(
-        ROOT_DIR_STRING,
-        ROOT_DIR_STRING,
-        NULL,
-        0
-    );
-    if (dentry == NULL) {
-        fprintf(stderr, "%s:%s:%d Failed to create ROOT dentry JSON.\n", __FILENAME__, __func__, __LINE__);
-        goto done;
+    cJSON *dentry_json = NULL;
+    int fresult = get_dentry_json(instance, pkey, &dentry_json);
+    if (fresult != 0) {
+        return fresult;
     }
+
+    cJSON *children_json = cJSON_GetObjectItemCaseSensitive(dentry_json, DENTRY_CHILDREN);
+    IfNULLGotoDoneWithRef(dentry_json, -EIO, pkey);
+
+    IfFalseGotoDoneWithRef(cJSON_IsArray(children_json), -EIO, pkey);
+
+    cJSON *child_json;
+    cJSON *new_children_json = cJSON_CreateArray();
+    cJSON_ArrayForEach(child_json, children_json) {
+        // copy and skip the path string that's being deleted
+        if (cJSON_IsString(child_json)) {
+            char *child_string = cJSON_GetStringValue(child_json);
+            if (strcmp(child_string, child_pkey) != 0) {
+                IfFalseGotoDoneWithRef(
+                    cJSON_AddItemToArray(new_children_json, cJSON_CreateString(child_string)),
+                    -EIO,
+                    pkey
+                );
+            }
+        }
+    }
+    cJSON_ReplaceItemInObjectCaseSensitive(dentry_json, DENTRY_CHILDREN, new_children_json);
+
+    /////
+
+    char *dentry_string = cJSON_PrintUnformatted(dentry_json);
+    IfNULLGotoDoneWithRef(dentry_string, -EIO, pkey);
 
     lcb_STATUS rc;
     lcb_CMDSTORE *cmd;
 
-    // insert only if key doesn't already exist
-    rc = lcb_cmdstore_create(&cmd, LCB_STORE_INSERT);
+    // replace the previous dentry
+    rc = lcb_cmdstore_create(&cmd, LCB_STORE_REPLACE);
     IfLCBFailGotoDone(rc, -EIO);
 
     rc = lcb_cmdstore_collection(
@@ -192,21 +264,22 @@ int insert_root_dentry(lcb_INSTANCE *instance)
         DENTRIES_COLLECTION_STRING, DENTRIES_COLLECTION_STRLEN);
     IfLCBFailGotoDone(rc, -EIO);
 
-    rc = lcb_cmdstore_key(cmd, ROOT_DIR_STRING, ROOT_DIR_STRLEN);
+    rc = lcb_cmdstore_key(cmd, pkey, strlen(pkey));
     IfLCBFailGotoDone(rc, -EIO);
 
-    rc = lcb_cmdstore_value(cmd, dentry, strlen(dentry));
+    rc = lcb_cmdstore_value(cmd, dentry_string, strlen(dentry_string));
     IfLCBFailGotoDone(rc, -EIO);
 
-    sync_store_result *result = NULL;
     rc = sync_store(instance, cmd, &result);
 
     // first check the sync command result code
     IfLCBFailGotoDone(rc, -EIO);
 
     // now check the actual result status
-    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, ROOT_DIR_STRING);
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
 
 done:
+    cJSON_Delete(dentry_json);
+    sync_store_destroy(result);
     return fresult;
 }

@@ -24,6 +24,7 @@
 #include "common.h"
 #include "sync_get.h"
 #include "sync_store.h"
+#include "sync_remove.h"
 
 static int get_block(lcb_INSTANCE *instance, const char *pkey, __unused uint8_t block, sync_get_result **result)
 {
@@ -129,10 +130,8 @@ static int update_block(lcb_INSTANCE *instance, const char *pkey, __unused uint8
     // TODO: retry if fail due to CAS (could also considering locking semantics with CAS to prevent this
 
 done:
-    // free the results
     sync_get_destroy(get_result);
     sync_store_destroy(store_result);
-
     return fresult;
 }
 
@@ -143,7 +142,7 @@ int read_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t 
     int fresult = 0;
     sync_get_result *get_result = NULL;
 
-    // TODO: Refactor to support multiple data block writes
+    // TODO: Refactor to support multiple data blocks
 
     // get the current data for the block and then deal with offset and max
     fresult = get_block(instance, pkey, 1, &get_result);
@@ -163,13 +162,14 @@ int read_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t 
     // Copy requested data into the buffer.
     memcpy((void*)buf, (void*)((get_result->value)+offset), nbuf);
 
+    fresult = update_stat_atime(instance, pkey);
+    IfFRFailGotoDoneWithRef(pkey);
+
     // Update the read result to indicate how many bytes were read
     fresult = nbuf;
 
 done:
-    // free the results
     sync_get_destroy(get_result);
-
     return fresult;
 }
 
@@ -177,7 +177,7 @@ int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t
 {
     int fresult = 0;
 
-    // TODO: Refactor to support multiple data block writes
+    // TODO: Refactor to support multiple data blocks
     IfTrueGotoDoneWithRef((offset + nbuf > MAX_FILE_LEN), -EFBIG, pkey);
 
     size_t new_block_size = 0;
@@ -194,5 +194,41 @@ int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t
 
 done:
     //fprintf(stderr, ">> write_data done: pkey:%s fr:%d\n", pkey, fresult);
+    return fresult;
+}
+
+int remove_data(lcb_INSTANCE *instance, const char *pkey)
+{
+    int fresult = 0;
+    sync_remove_result *result = NULL;
+
+    // TODO: Refactor to support multiple data blocks
+
+    lcb_STATUS rc;
+    lcb_CMDREMOVE *cmd;
+
+    // insert only if key doesn't already exist
+    rc = lcb_cmdremove_create(&cmd);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdremove_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        BLOCKS_COLLECTION_STRING, BLOCKS_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdremove_key(cmd, pkey, strlen(pkey));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_remove(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
+
+done:
+    sync_remove_destroy(result);
     return fresult;
 }

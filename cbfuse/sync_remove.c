@@ -19,45 +19,45 @@
 #include <string.h>
 #include <libcouchbase/couchbase.h>
 
-#include "sync_store.h"
+#include "sync_remove.h"
 
-static void sync_store_callback(__unused lcb_INSTANCE *instance, __unused int cbtype, const lcb_RESPSTORE *resp)
+static void sync_remove_callback(__unused lcb_INSTANCE *instance, __unused int cbtype, const lcb_RESPREMOVE *resp)
 {
-    sync_store_result *result;
-    lcb_respstore_cookie(resp, (void**)&result);
+    sync_remove_result *result;
+    lcb_respremove_cookie(resp, (void**)&result);
     if (result == NULL) {
         return;
     }
 
-    lcb_STATUS status = lcb_respstore_status(resp);
+    lcb_STATUS status = lcb_respremove_status(resp);
     result->status = status;
     if (status == LCB_SUCCESS) {
         // TBD - nothing extra needed currently
     }
 }
 
-void sync_store_init(lcb_INSTANCE *instance)
+void sync_remove_init(lcb_INSTANCE *instance)
 {
-    lcb_install_callback(instance, LCB_CALLBACK_STORE, (lcb_RESPCALLBACK)sync_store_callback);
+    lcb_install_callback(instance, LCB_CALLBACK_REMOVE, (lcb_RESPCALLBACK)sync_remove_callback);
 }
 
-lcb_STATUS sync_store(lcb_INSTANCE *instance, lcb_CMDSTORE *cmd, sync_store_result **result)
+lcb_STATUS sync_remove(lcb_INSTANCE *instance, lcb_CMDREMOVE *cmd, sync_remove_result **result)
 {
     lcb_STATUS rc;
-    *result = calloc(1, sizeof(sync_store_result));
-    rc = lcb_store(instance, *result, cmd);
+    *result = calloc(1, sizeof(sync_remove_result));
+    rc = lcb_remove(instance, *result, cmd);
     if (rc != LCB_SUCCESS) {
-        fprintf(stderr, "  sync_store:lcb_store: %s\n", lcb_strerror_short(rc));
+        fprintf(stderr, "  sync_remove:lcb_remove: %s\n", lcb_strerror_short(rc));
         return rc;
     }
 
-    rc = lcb_cmdstore_destroy(cmd);
+    rc = lcb_cmdremove_destroy(cmd);
     rc = lcb_wait(instance, LCB_WAIT_DEFAULT);
 
     return rc;
 }
 
-void sync_store_destroy(sync_store_result *result)
+void sync_remove_destroy(sync_remove_result *result)
 {
     if (result != NULL) {
         free(result);

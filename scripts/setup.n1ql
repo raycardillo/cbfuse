@@ -1,0 +1,3 @@
+CREATE COLLECTION `cbfuse`._default.stats;
+CREATE COLLECTION `cbfuse`._default.blocks;
+CREATE COLLECTION `cbfuse`._default.dentries;
