@@ -79,7 +79,7 @@ static int update_block(lcb_INSTANCE *instance, const char *pkey, __unused uint8
         get_result->nvalue = nupdate;
         *new_block_size = nupdate;
     } else {
-        IfFRFailGotoDoneWithRef(pkey);
+        IfFRErrorGotoDoneWithRef(pkey);
     }
 
     // if we need more room then grow the buffer
@@ -146,7 +146,7 @@ int read_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t 
 
     // get the current data for the block and then deal with offset and max
     fresult = get_block(instance, pkey, 1, &get_result);
-    IfFRFailGotoDoneWithRef(pkey);
+    IfFRErrorGotoDoneWithRef(pkey);
 
     // the result size is the max read size
     size_t max_size = get_result->nvalue;
@@ -163,7 +163,7 @@ int read_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t 
     memcpy((void*)buf, (void*)((get_result->value)+offset), nbuf);
 
     fresult = update_stat_atime(instance, pkey);
-    IfFRFailGotoDoneWithRef(pkey);
+    IfFRErrorGotoDoneWithRef(pkey);
 
     // Update the read result to indicate how many bytes were read
     fresult = nbuf;
@@ -182,11 +182,11 @@ int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t
 
     size_t new_block_size = 0;
     fresult = update_block(instance, pkey, 1, buf, nbuf, offset, &new_block_size);
-    IfFRFailGotoDoneWithRef(pkey);
+    IfFRErrorGotoDoneWithRef(pkey);
 
     if (new_block_size != 0) {
         fresult = update_stat_size(instance, pkey, new_block_size);
-        IfFRFailGotoDoneWithRef(pkey);
+        IfFRErrorGotoDoneWithRef(pkey);
     }
 
     // Update the write result to indicate how many bytes were written

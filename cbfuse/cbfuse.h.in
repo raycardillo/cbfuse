@@ -16,3 +16,4 @@
 
 #define cbfuse_VERSION_MAJOR @cbfuse_VERSION_MAJOR@
 #define cbfuse_VERSION_MINOR @cbfuse_VERSION_MINOR@
+#define cbfuse_VERSION_PATCH @cbfuse_VERSION_PATCH@

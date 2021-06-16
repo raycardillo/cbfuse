@@ -32,6 +32,14 @@ if ((rc) != LCB_SUCCESS) { \
   goto done; \
 }
 
+#define IfLCBFailGotoDoneWithMsg(rc, fr, msg) \
+if ((rc) != LCB_SUCCESS) { \
+  fprintf(stderr, "%s. (%s)\n", msg, lcb_strerror_short(rc)); \
+  fresult = fr; \
+  goto done; \
+}
+
+
 #define IfLCBFailGotoDoneWithRef(rc, fr, ref) \
 if ((rc) != LCB_SUCCESS) { \
   fprintf(stderr, "  %s:%s:%d LCB_FAIL %s %s\n", __FILENAME__, __func__, __LINE__, ref, lcb_strerror_short(rc)); \
@@ -55,9 +63,15 @@ if (val) { \
 
 #define IfFalseGotoDoneWithRef(val, fr, ref) IfTrueGotoDoneWithRef((!(val)), fr, ref)
 
+#define IfFRErrorGotoDoneWithRef(ref) \
+if (fresult != 0) { \
+  fprintf(stderr, "  %s:%s:%d FR_ERROR (%d)(%s) %s\n", __FILENAME__, __func__, __LINE__, fresult, strerror(-fresult), ref); \
+  goto done; \
+}
+
 #define IfFRFailGotoDoneWithRef(ref) \
 if (fresult != 0) { \
-  fprintf(stderr, "  %s:%s:%d FR_FAIL (%d)(%s) %s\n", __FILENAME__, __func__, __LINE__, fresult, strerror(-fresult), ref); \
+  fprintf(stderr, "  %s:%s:%d FR_FAIL %s\n", __FILENAME__, __func__, __LINE__, ref); \
   goto done; \
 }
 

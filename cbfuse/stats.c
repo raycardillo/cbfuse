@@ -174,7 +174,7 @@ int update_stat_atime(lcb_INSTANCE *instance, const char *pkey)
     // get the current stat
     uint64_t cas = 0;
     fresult = get_stat(instance, pkey, &stat, &cas);
-    IfFRFailGotoDoneWithRef(pkey);
+    IfFRErrorGotoDoneWithRef(pkey);
 
     // get the current time to update modified time
     struct timespec ts;
@@ -238,7 +238,7 @@ int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size)
     // get the current stat
     uint64_t cas = 0;
     fresult = get_stat(instance, pkey, &stat, &cas);
-    IfFRFailGotoDoneWithRef(pkey);
+    IfFRErrorGotoDoneWithRef(pkey);
 
     // get the current time to update modified time
     struct timespec ts;

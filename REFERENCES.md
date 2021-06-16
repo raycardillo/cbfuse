@@ -20,6 +20,7 @@ Reference FUSE projects worth reviewing:
   - https://github.com/osxfuse/filesystems
   - https://github.com/osxfuse/sshfs
   - https://github.com/libfuse/sshfs
+  - https://github.com/pierreis/bbfs
 
 Useful CMake scripts:
   - https://github.com/StableCoder/cmake-scripts

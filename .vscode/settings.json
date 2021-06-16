@@ -8,6 +8,7 @@
         "xxhash.h": "c",
         "unistd.h": "c",
         "stdlib.h": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "cbfuse.h": "c"
     }
 }

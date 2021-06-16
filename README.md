@@ -69,6 +69,16 @@ If you're looking for an actual distributed file server built on top of Couchbas
   - `mkdir build; cd build`
   - `cmake ..`
   - `cmake --build . --config Release`
+- Setup Couchbase
+  - Start the Couchbase server
+  - Create a bucket (e.g., `cbfuse`)
+  - Under the `_default` **Scope**, add the following **Collections**:
+    - `stats` - _used for basic file stat attributes_
+    - `blocks` - _used to store file data blocks_
+    - `dentries` - _used to store directory entry info_
 - Running a quick debug test
-  - `./cbfuse/cbfuse ~/cbfuse -f -s`
-  - _note that this is running in the foreground and single threaded_
+  - _This filesystem runs in the **foreground** and is **single-threaded**._
+  - Mount the filesystem
+    - `./cbfuse/cbfuse ~/cbfuse --cb_connect=couchbase://127.0.0.1/cbfuse --cb_username=raycardillo --cb_password=raycardillo`
+  - Unmount the filesystem
+    - `umount cbfuse`

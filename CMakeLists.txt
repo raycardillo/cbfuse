@@ -21,6 +21,11 @@ SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wshadow")
 
 include(sanitizers)
 
-project( cbfuse VERSION 0.1 LANGUAGES C )
+project( cbfuse
+  VERSION
+    0.1.0
+  LANGUAGES
+    C
+)
 
 add_subdirectory( cbfuse )

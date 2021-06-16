@@ -27,6 +27,7 @@
 #include <xxhash.h>
 #include <fuse.h>
 
+#include <cbfuse.h>
 #include "util.h"
 #include "common.h"
 #include "sync_get.h"
@@ -36,23 +37,13 @@
 #include "dentries.h"
 #include "data.h"
 
-// IMPORTANT:
-// When running, use the '-s' option to force single-threaded operation for now
-//
-// NOTE: Single threaded for now but to avoid using a Mutex, we can have a per thread initializer.
-// TODO: Implement a mutex or thread local storage to support multi-threaded operations.
-_Thread_local lcb_INSTANCE *_thread_instance;
+// We're using high-level FUSE ops which are synchronous
+// and from those we're making synchronous calls to Couchbase.
+static lcb_INSTANCE *_lcb_instance = NULL;
 
 /////
 
-static void die(__unused lcb_INSTANCE *instance, const char *msg, lcb_STATUS err)
-{
-    fprintf(stderr, "%s. (%s)\n", msg, lcb_strerror_short(err));
-    exit(EXIT_FAILURE);
-}
-
-/////
-
+__unused
 static void open_callback(__unused lcb_INSTANCE *instance, lcb_STATUS rc)
 {
     fprintf(stderr, "open bucket: %s\n", lcb_strerror_short(rc));
@@ -92,7 +83,7 @@ static int cb_getattr(const char *path, struct stat *stbuf)
     rc = lcb_cmdget_key(cmd, path, npath);
     IfLCBFailGotoDone(rc, -EIO);
 
-    rc = sync_get(_thread_instance, cmd, &result);
+    rc = sync_get(_lcb_instance, cmd, &result);
 
     // first check the sync command result code
     IfLCBFailGotoDone(rc, -EIO);
@@ -103,10 +94,13 @@ static int cb_getattr(const char *path, struct stat *stbuf)
     // sanity check that we received the expected structure
     IfTrueGotoDoneWithRef((result->nvalue != CBFUSE_STAT_STRUCT_SIZE), -EBADF, path);
 
+    // get the fuse context (for uid and gid)
+    struct fuse_context *fc = fuse_get_context();
+
     // copy the stat binary into the stat buffer
     cbfuse_stat *stres = (cbfuse_stat*)result->value;
-    stbuf->st_uid = geteuid();
-    stbuf->st_gid = getegid();
+    stbuf->st_uid = fc->uid;
+    stbuf->st_gid = fc->gid;
     stbuf->st_mode = stres->st_mode;
     stbuf->st_atime = stres->st_atime;
     stbuf->st_atimensec = stres->st_atimensec;
@@ -133,8 +127,8 @@ static int cb_open(const char *path, struct fuse_file_info *fi)
     IfTrueGotoDoneWithRef((npath > MAX_PATH_LEN), ENAMETOOLONG, path);
 
     cbfuse_stat stat = {0};
-    fresult = get_stat(_thread_instance, path, &stat, NULL);
-    IfFRFailGotoDoneWithRef(path);
+    fresult = get_stat(_lcb_instance, path, &stat, NULL);
+    IfFRErrorGotoDoneWithRef(path);
 
 done:
     return fresult;
@@ -166,11 +160,11 @@ static int cb_create(const char *path, mode_t mode, __unused struct fuse_file_in
         path
     );
 
-    fresult = insert_stat(_thread_instance, path, mode);
-    IfFRFailGotoDoneWithRef(path);
+    fresult = insert_stat(_lcb_instance, path, mode);
+    IfFRErrorGotoDoneWithRef(path);
 
-    fresult = add_child_to_dentry(_thread_instance, dname, bname);
-    IfFRFailGotoDoneWithRef(path);
+    fresult = add_child_to_dentry(_lcb_instance, dname, bname);
+    IfFRErrorGotoDoneWithRef(path);
 
 done:
     return fresult;
@@ -190,10 +184,10 @@ static int cb_unlink(const char *path)
     // TODO: These operations can be in a transaction or at least scheduled as a batch
 
     // Only check the stat operation - others can fail silently and may be useful for error recovery
-    fresult = remove_data(_thread_instance, path);
-    fresult = remove_child_from_dentry(_thread_instance, dname, bname);
-    fresult = remove_stat(_thread_instance, path);
-    IfFRFailGotoDoneWithRef(path);
+    fresult = remove_data(_lcb_instance, path);
+    fresult = remove_child_from_dentry(_lcb_instance, dname, bname);
+    fresult = remove_stat(_lcb_instance, path);
+    IfFRErrorGotoDoneWithRef(path);
 
 done:
     return fresult;
@@ -204,8 +198,8 @@ static int cb_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
     fprintf(stderr, "cb_readdir path:%s\n", path);
 
     cJSON *dentry_json = NULL;
-    int fresult = get_dentry_json(_thread_instance, path, &dentry_json);
-    IfFRFailGotoDoneWithRef(path);
+    int fresult = get_dentry_json(_lcb_instance, path, &dentry_json);
+    IfFRErrorGotoDoneWithRef(path);
 
     int child_offset = 0;
     cJSON *child;
@@ -230,8 +224,8 @@ static int cb_read(const char *path, char *buf, size_t size, off_t offset, __unu
 {
     fprintf(stderr, "cb_read path:%s size:%lu offset:%llu\n", path, size, offset);
 
-    int fresult = read_data(_thread_instance, path, buf, size, offset);
-    IfFRFailGotoDoneWithRef(path);
+    int fresult = read_data(_lcb_instance, path, buf, size, offset);
+    IfFRErrorGotoDoneWithRef(path);
 
 done:
     return fresult;
@@ -241,8 +235,8 @@ static int cb_write(const char *path, const char *buf, size_t size, off_t offset
 {
     fprintf(stderr, "cb_write path:%s size:%lu offset:%llu\n", path, size, offset);
 
-    int fresult = write_data(_thread_instance, path, buf, size, offset);
-    IfFRFailGotoDoneWithRef(path);
+    int fresult = write_data(_lcb_instance, path, buf, size, offset);
+    IfFRErrorGotoDoneWithRef(path);
 
 done:
     return fresult;
@@ -250,21 +244,22 @@ done:
 
 /////
 
+__unused
 static int insert_root(lcb_INSTANCE *instance) {
     // TODO: Consider refactoring to C++ to take advantage of transaction context with multiple ops
 
     // add root stat as directory with 0x755 permissions
     int fresult = insert_stat(instance, ROOT_DIR_STRING, (S_IFDIR | 0755));
-    IfFRFailGotoDoneWithRef(ROOT_DIR_STRING);
+    IfFRErrorGotoDoneWithRef(ROOT_DIR_STRING);
 
     fresult = insert_root_dentry(instance);
-    IfFRFailGotoDoneWithRef(ROOT_DIR_STRING);
+    IfFRErrorGotoDoneWithRef(ROOT_DIR_STRING);
 
 done:
     return fresult;
 }
 
-/////
+///// INITIALIZATION AND BOOTSTRAPPING
 
 static struct fuse_operations cb_filesystem_operations = {
     .init    = cb_init,
@@ -277,95 +272,148 @@ static struct fuse_operations cb_filesystem_operations = {
     .write   = cb_write,
 };
 
-__unused
-static void usage(const char *name)
+struct cbfuse_config {
+    char *cb_connect;
+    char *cb_username;
+    char *cb_password;
+};
+
+enum {
+     KEY_HELP,
+     KEY_VERSION
+};
+
+#define CBFUSE_OPT(t, p, v) { t, offsetof(struct cbfuse_config, p), v }
+
+static struct fuse_opt cbfuse_opts[] = {
+    CBFUSE_OPT("cb_connect=%s",     cb_connect, 0),
+    CBFUSE_OPT("--cb_connect=%s",   cb_connect, 0),
+    CBFUSE_OPT("cb_username=%s",    cb_username, 0),
+    CBFUSE_OPT("--cb_username=%s",  cb_username, 0),
+    CBFUSE_OPT("cb_password=%s",    cb_password, 0),
+    CBFUSE_OPT("--cb_password=%s",  cb_password, 0),
+
+    FUSE_OPT_KEY("-V",              KEY_VERSION),
+    FUSE_OPT_KEY("--version",       KEY_VERSION),
+    FUSE_OPT_KEY("-h",              KEY_HELP),
+    FUSE_OPT_KEY("--help",          KEY_HELP),
+    FUSE_OPT_END
+};
+
+static void usage(const char *name) {
+    fprintf(stderr,
+        "usage: %s mountpoint [options]\n"
+        "\n"
+        "general options:\n"
+        "  -o opt,[opt...]  mount options\n"
+        "  -h   --help      print help\n"
+        "  -V   --version   print version\n"
+        "\n"
+        "couchbase connection options:\n"
+        "  -o cb_connect=COUCHBASE_CONNECT_STRING\n"
+        "  -o cb_username=COUCHBASE_SASL_USERNAME\n"
+        "  -o cb_password=COUCHBASE_SASL_PASSWORD\n"
+        "  --cb_connect=COUCHBASE_CONNECT_STRING\n"
+        "  --cb_username=COUCHBASE_SASL_USERNAME\n"
+        "  --cb_password=COUCHBASE_SASL_PASSWORD\n"
+        "\n"
+        "example:\n"
+        "  %s ~/mountdir --cb_connect=couchbase://127.0.0.1/cbfuse --cb_username=rcardillo --cb_password=rcardillo\n"
+        , name, name
+    );
+}
+
+static int cbfuse_opt_proc(void *data, __unused const char *arg, int key, struct fuse_args *outargs)
 {
-	fprintf(stderr,
-    "Usage: %s couchbase://host/bucket mountpoint [options]\n"
-    "\n"
-    "    -h   --help            print help\n"
-    "    -V   --version         print version\n"
-    "    -f                     foreground operation\n"
-    "    -s                     disable multi-threaded operation\n"
-    "    -d, --debug            print some debugging information (implies -f)\n"
-    "    -v, --verbose          print ssh replies and messages\n"
-    "    -o opt,[opt...]        mount options\n"
-    // "    -o dir_cache=BOOL      enable caching of directory contents (names,\n"
-    // "                           attributes, symlink targets) {yes,no} (default: yes)\n"
-    // "    -o dcache_max_size=N   sets the maximum size of the directory cache (default: 10000)\n"
-    // "    -o dcache_timeout=N    sets timeout for directory cache in seconds (default: 20)\n"
-    // "    -o dcache_{stat,link,dir}_timeout=N\n"
-    // "                           sets separate timeout for {attributes, symlinks, names}\n"
-    // "    -o dcache_clean_interval=N\n"
-    // "                           sets the interval for automatic cleaning of the\n"
-    // "                           cache (default: 60)\n"
-    // "    -o dcache_min_clean_interval=N\n"
-    // "                           sets the interval for forced cleaning of the\n"
-    // "                           cache if full (default: 5)\n"
-    "    -o username=UNAME      read password from stdin (only for pam_mount!)\n"
-    "    -o password=PWORD      read password from stdin (only for pam_mount!)\n"
-    "    -o password_stdin      read password from stdin (only for pam_mount!)\n"
-    "\n"
-    "FUSE Options:\n",
-    name);
+    __unused struct cbfuse_config *config = data;
+
+    switch (key) {
+    case KEY_HELP:
+        usage(basename(outargs->argv[0]));
+        // fuse_opt_add_arg(outargs, "--help");
+        // fuse_main(outargs->argc, outargs->argv, &cb_filesystem_operations, NULL);
+        exit(EXIT_FAILURE);
+
+    case KEY_VERSION:
+        fprintf(stderr, "%s version: %d.%d.%d\n", basename(outargs->argv[0]), cbfuse_VERSION_MAJOR, cbfuse_VERSION_MINOR, cbfuse_VERSION_PATCH);
+        fuse_opt_add_arg(outargs, "--version");
+        fuse_main(outargs->argc, outargs->argv, &cb_filesystem_operations, NULL);
+        exit(EXIT_SUCCESS);
+    }
+
+    return 1;
 }
 
 int main(int argc, char **argv)
-{
+{    
     if ((getuid() == 0) || (geteuid() == 0)) {
         fprintf(stderr, "Running as root is not allowed because it may open security holes.\n");
         return 1;
     }
 
+    ///// PARSE ARGUMENTS
+
+    struct fuse_args fargs = FUSE_ARGS_INIT(argc, argv);
+    struct cbfuse_config config = {0};
+
+    int fresult = fuse_opt_parse(&fargs, &config, cbfuse_opts, cbfuse_opt_proc);
+    IfFRFailGotoDoneWithRef("Could not parse options");
+
+    // set FUSE single-threaded mode
+    fresult = fuse_opt_add_arg(&fargs, "-s");
+    IfFRFailGotoDoneWithRef("Could not add FUSE single-threaded mode option.");
+
+    // set FUSE foreground mode
+    fresult = fuse_opt_add_arg(&fargs, "-f");
+    IfFRFailGotoDoneWithRef("Could not add FUSE foreground mode option.");
+
+    // make sure a reasonable connection string has been provided
+    if (config.cb_connect == NULL || strlen(config.cb_connect) < 5) {
+        fprintf(stderr, "Couchbase connection string must be provided.\n\n");
+        usage(basename(argv[0]));
+        exit(EXIT_FAILURE);
+    }
+
     ///// CONNECT TO COUCHBASE
-
-    // TODO: more advanced arg processing (see SSHFS)
-    // TODO: remove temporary dev hard-coded connect values
-
-    // if (argc < 2) {
-    //     fprintf(stderr, "Usage: %s couchbase://$HOSTS/$BUCKET?$OPTIONS [ password [ username ] ]\n", argv[0]);
-    //     exit(EXIT_FAILURE);
-    // }
-    char *connect = "couchbase://127.0.0.1/cbfuse";
-    char *username = "raycardillo";
-    char *password = "raycardillo";
 
     lcb_CREATEOPTS *create_options = NULL;
     lcb_createopts_create(&create_options, LCB_TYPE_CLUSTER);
-    lcb_createopts_connstr(create_options, connect, strlen(connect));
-    if (1) { // TODO: if credentials provided
-        lcb_createopts_credentials(create_options, username, strlen(username), password, strlen(password));
+    lcb_createopts_connstr(create_options, config.cb_connect, strlen(config.cb_connect));
+    if (config.cb_username != NULL || config.cb_password != NULL) {
+        lcb_createopts_credentials(
+            create_options,
+            config.cb_username, strlen(config.cb_username),
+            config.cb_password, strlen(config.cb_password)
+        );
     }
 
     lcb_STATUS rc;
-    rc = lcb_create(&_thread_instance, create_options);
+    rc = lcb_create(&_lcb_instance, create_options);
     lcb_createopts_destroy(create_options);
-    rc = lcb_connect(_thread_instance);
-    if (rc != LCB_SUCCESS) {
-        die(NULL, "Couldn't create couchbase connect handle", rc);
-    }
+    IfLCBFailGotoDoneWithMsg(rc, EXIT_FAILURE, "Couldn't create a couchbase instance.");
+    IfNULLGotoDoneWithRef(_lcb_instance, EXIT_FAILURE, "Couldn't create a couchbase instance.");
 
-    rc = lcb_wait(_thread_instance, LCB_WAIT_DEFAULT);
+    rc = lcb_connect(_lcb_instance);
+    IfLCBFailGotoDoneWithMsg(rc, EXIT_FAILURE, "Couldn't create couchbase connect handle.");
 
-    rc = lcb_get_bootstrap_status(_thread_instance);
-    if (rc != LCB_SUCCESS) {
-        die(_thread_instance, "Couldn't bootstrap connection (make sure server is running)", rc);
-    }
+    rc = lcb_wait(_lcb_instance, LCB_WAIT_DEFAULT);
+    IfLCBFailGotoDoneWithMsg(rc, EXIT_FAILURE, "Couldn't connect to couchbase.");
+
+    rc = lcb_get_bootstrap_status(_lcb_instance);
+    IfLCBFailGotoDoneWithMsg(rc, EXIT_FAILURE, "Couldn't bootstrap couchbase connection (make sure server is running).");
 
     // install callbacks for the initialized instance
-    lcb_set_open_callback(_thread_instance, open_callback);
-    sync_get_init(_thread_instance);
-    sync_store_init(_thread_instance);
-    sync_remove_init(_thread_instance);
+    lcb_set_open_callback(_lcb_instance, open_callback);
+    sync_get_init(_lcb_instance);
+    sync_store_init(_lcb_instance);
+    sync_remove_init(_lcb_instance);
 
     const char *bucket = "cbfuse";
-    rc = lcb_open(_thread_instance, bucket, strlen(bucket)),
+    rc = lcb_open(_lcb_instance, bucket, strlen(bucket));
+    IfLCBFailGotoDoneWithMsg(rc, EXIT_FAILURE, "Couldn't create a couchbase open bucket request.");
 
-    rc = lcb_wait(_thread_instance, LCB_WAIT_DEFAULT);
-
-    if (rc != LCB_SUCCESS) {
-        die(_thread_instance, "Couldn't open bucket", rc);
-    }
+    rc = lcb_wait(_lcb_instance, LCB_WAIT_DEFAULT);
+    IfLCBFailGotoDoneWithMsg(rc, EXIT_FAILURE, "Couldn't open couchbase bucket.");
 
     ///// VERIFY OR INSTALL ROOT DIR
 
@@ -375,22 +423,35 @@ int main(int argc, char **argv)
         if (!S_ISDIR(root_stat.st_mode)) {
             // we received something but it's not a directory
             fprintf(stderr, "Unexpected root directory detected. st_mode=0x%02x\n", root_stat.st_mode);
-            exit(EXIT_FAILURE);
+            fresult = EXIT_FAILURE;
+            goto done;
         }
     } else if (get_root_rc == -ENOENT) {
-        if (insert_root(_thread_instance) != 0) {
+        if (insert_root(_lcb_instance) != 0) {
             fprintf(stderr, "Unexpected error when trying to create root directory.\n");
-            exit(EXIT_FAILURE);
+            fresult = EXIT_FAILURE;
+            goto done;
         }
     } else {
         fprintf(stderr, "Unexpected error when trying to find root directory.\n");
-        exit(EXIT_FAILURE);
+        fresult = EXIT_FAILURE;
+        goto done;
     }
 
-    return fuse_main(argc, argv, &cb_filesystem_operations, NULL);
+    ///// MOUNT THE FUSE FILESYSTEM AND START THE EVENT LOOP
 
-    // TODO: register sig handler and call destroy and clean-up
-    /* Now that we're all done, close down the connection handle */
-    // lcb_destroy(_thread_instance);
-    // return 0;
+    fresult = fuse_main(fargs.argc, fargs.argv, &cb_filesystem_operations, NULL);
+    IfFRErrorGotoDoneWithRef("FUSE error encountered.");
+
+done:
+    fuse_opt_free_args(&fargs);
+	free(config.cb_connect);
+	free(config.cb_username);
+	free(config.cb_password);
+
+    if (_lcb_instance) {
+        lcb_destroy(_lcb_instance);
+    }
+
+	return fresult;
 }
