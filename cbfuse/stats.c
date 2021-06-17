@@ -26,6 +26,9 @@
 #include "sync_store.h"
 #include "sync_remove.h"
 
+#define UTIME_NOW       -1
+#define UTIME_OMIT      -2
+
 const size_t CBFUSE_STAT_STRUCT_SIZE = sizeof(cbfuse_stat);
 
 int get_stat(lcb_INSTANCE *instance, const char *pkey, cbfuse_stat *stat, uint64_t *cas)
@@ -80,10 +83,11 @@ int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode)
 
     // get the current time to update file times
     struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
-        fresult = -EIO;
-        goto done;
-    }
+    IfFalseGotoDoneWithRef(
+        (clock_gettime(CLOCK_REALTIME, &ts) == 0),
+        -EIO,
+        "clock_gettime"
+    );
 
     // create the stat struct to insert
     root_stat.st_mode = mode;
@@ -178,14 +182,102 @@ int update_stat_atime(lcb_INSTANCE *instance, const char *pkey)
 
     // get the current time to update modified time
     struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
-        fresult = -EIO;
-        goto done;
-    }
+    IfFalseGotoDoneWithRef(
+        (clock_gettime(CLOCK_REALTIME, &ts) == 0),
+        -EIO,
+        "clock_gettime"
+    );
 
     // update the stat struct
     stat.st_atime = ts.tv_sec;
     stat.st_atimensec = ts.tv_nsec;
+
+    // now write the stat back to Couchbase
+
+    lcb_STATUS rc;
+    lcb_CMDSTORE *cmd;
+
+    // update the stat entry with the new version
+    rc = lcb_cmdstore_create(&cmd, LCB_STORE_REPLACE);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        STATS_COLLECTION_STRING, STATS_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_datatype(cmd, LCB_VALUE_RAW);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_cas(cmd, cas);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_key(cmd, pkey, strlen(pkey));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_value(cmd, (char*)&stat, CBFUSE_STAT_STRUCT_SIZE);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_store(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
+
+    // TODO: retry if fail due to CAS (could also considering locking semantics with CAS to prevent this
+
+done:
+    sync_store_destroy(result);
+    return fresult;
+}
+
+int update_stat_utimens(lcb_INSTANCE *instance, const char *pkey, const struct timespec tv[2])
+{
+    int fresult = 0;
+    cbfuse_stat stat = {0};
+    sync_store_result *result = NULL;
+
+    // get the current stat
+    uint64_t cas = 0;
+    fresult = get_stat(instance, pkey, &stat, &cas);
+    IfFRErrorGotoDoneWithRef(pkey);
+    
+    // get the current time to update file times
+    struct timespec ts_now;
+    if (tv == NULL || tv[0].tv_nsec == UTIME_NOW || tv[1].tv_nsec == UTIME_NOW) {
+        IfFalseGotoDoneWithRef(
+            (clock_gettime(CLOCK_REALTIME, &ts_now) == 0),
+            -EIO,
+            "clock_gettime"
+        );
+    }
+
+    // update the stat struct - the rules are a little complicated
+    // for details see: UTIMENSAT(2)
+    if (tv == NULL) {
+        stat.st_atime = ts_now.tv_sec;
+        stat.st_atimensec = ts_now.tv_nsec;
+        stat.st_mtime = ts_now.tv_sec;
+        stat.st_mtimensec = ts_now.tv_nsec;
+    } else {
+        if (tv[0].tv_nsec == UTIME_NOW) {
+            stat.st_atime = ts_now.tv_sec;
+            stat.st_atimensec = ts_now.tv_nsec;
+        } else if (tv[0].tv_nsec != UTIME_OMIT) {
+            stat.st_atime = tv[0].tv_sec;
+            stat.st_atimensec = tv[0].tv_nsec;
+        }
+        if (tv[1].tv_nsec == UTIME_NOW) {
+            stat.st_mtime = ts_now.tv_sec;
+            stat.st_mtimensec = ts_now.tv_nsec;
+        } else if (tv[1].tv_nsec != UTIME_OMIT) {
+            stat.st_mtime = tv[1].tv_sec;
+            stat.st_mtimensec = tv[1].tv_nsec;
+        }
+    }
 
     // now write the stat back to Couchbase
 
@@ -242,15 +334,72 @@ int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size)
 
     // get the current time to update modified time
     struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
-        fresult = -EIO;
-        goto done;
-    }
+    IfFalseGotoDoneWithRef(
+        (clock_gettime(CLOCK_REALTIME, &ts) == 0),
+        -EIO,
+        "clock_gettime"
+    );
 
     // update the stat struct
     stat.st_mtime = ts.tv_sec;
     stat.st_mtimensec = ts.tv_nsec;
     stat.st_size = size;
+
+    // now write the stat back to Couchbase
+
+    lcb_STATUS rc;
+    lcb_CMDSTORE *cmd;
+
+    // update the stat entry with the new version
+    rc = lcb_cmdstore_create(&cmd, LCB_STORE_REPLACE);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        STATS_COLLECTION_STRING, STATS_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_datatype(cmd, LCB_VALUE_RAW);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_cas(cmd, cas);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_key(cmd, pkey, strlen(pkey));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdstore_value(cmd, (char*)&stat, CBFUSE_STAT_STRUCT_SIZE);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_store(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
+
+    // TODO: retry if fail due to CAS (could also considering locking semantics with CAS to prevent this
+
+done:
+    sync_store_destroy(result);
+    return fresult;
+}
+
+int update_stat_mode(lcb_INSTANCE *instance, const char *pkey, mode_t mode)
+{
+    int fresult = 0;
+    cbfuse_stat stat = {0};
+    sync_store_result *result = NULL;
+
+    // get the current stat
+    uint64_t cas = 0;
+    fresult = get_stat(instance, pkey, &stat, &cas);
+    IfFRErrorGotoDoneWithRef(pkey);
+
+    // update the stat struct
+    stat.st_mode = mode;
 
     // now write the stat back to Couchbase
 

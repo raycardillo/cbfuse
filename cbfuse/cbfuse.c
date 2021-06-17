@@ -51,16 +51,21 @@ static void open_callback(__unused lcb_INSTANCE *instance, lcb_STATUS rc)
 
 /////
 
-static void *cb_init(__unused struct fuse_conn_info *conn)
+// Initialize filesystem
+static void *cbfuse_init(__unused struct fuse_conn_info *conn)
 {
+    fprintf(stderr, "cbfuse_init\n");
+
     conn->async_read = false;
-    conn->want = FUSE_CAP_BIG_WRITES;
+    conn->want |= FUSE_CAP_BIG_WRITES;
+
     return NULL;
 }
 
-static int cb_getattr(const char *path, struct stat *stbuf)
+// Get file attributes
+static int cbfuse_getattr(const char *path, struct stat *stbuf)
 {
-    fprintf(stderr, "cb_getattr path:%s\n", path);
+    fprintf(stderr, "cbfuse_getattr path:%s\n", path);
 
     int fresult = 0;
     sync_get_result *result = NULL;
@@ -117,9 +122,10 @@ done:
     return fresult;
 }
 
-static int cb_open(const char *path, struct fuse_file_info *fi)
+// File open operation
+static int cbfuse_open(const char *path, struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_open path:%s flags:0x%04x\n", path, fi->flags);
+    fprintf(stderr, "cbfuse_open path:%s flags:0x%04x\n", path, fi->flags);
     
     int fresult = 0;
 
@@ -134,9 +140,10 @@ done:
     return fresult;
 }
 
-static int cb_create(const char *path, mode_t mode, __unused struct fuse_file_info *fi)
+// Create and open a file
+static int cbfuse_create(const char *path, mode_t mode, __unused struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_create path:%s mode:0x%02x\n", path, mode);
+    fprintf(stderr, "cbfuse_create path:%s mode:0x%02x\n", path, mode);
 
     int fresult = 0;
 
@@ -170,9 +177,10 @@ done:
     return fresult;
 }
 
-static int cb_unlink(const char *path)
+// Remove a file
+static int cbfuse_unlink(const char *path)
 {
-    fprintf(stderr, "cb_unlink path:%s\n", path);
+    fprintf(stderr, "cbfuse_unlink path:%s\n", path);
 
     int fresult = 0;
 
@@ -193,9 +201,10 @@ done:
     return fresult;
 }
 
-static int cb_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, __unused struct fuse_file_info *fi)
+// Read directory
+static int cbfuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, __unused struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_readdir path:%s\n", path);
+    fprintf(stderr, "cbfuse_readdir path:%s\n", path);
 
     cJSON *dentry_json = NULL;
     int fresult = get_dentry_json(_lcb_instance, path, &dentry_json);
@@ -220,9 +229,10 @@ done:
     return fresult;
 }
 
-static int cb_read(const char *path, char *buf, size_t size, off_t offset, __unused struct fuse_file_info *fi)
+// Read data from an open file
+static int cbfuse_read(const char *path, char *buf, size_t size, off_t offset, __unused struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_read path:%s size:%lu offset:%llu\n", path, size, offset);
+    fprintf(stderr, "cbfuse_read path:%s size:%lu offset:%llu\n", path, size, offset);
 
     int fresult = read_data(_lcb_instance, path, buf, size, offset);
     IfFRErrorGotoDoneWithRef(path);
@@ -231,11 +241,48 @@ done:
     return fresult;
 }
 
-static int cb_write(const char *path, const char *buf, size_t size, off_t offset, __unused struct fuse_file_info *fi)
+// Write data to an open file
+static int cbfuse_write(const char *path, const char *buf, size_t size, off_t offset, __unused struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cb_write path:%s size:%lu offset:%llu\n", path, size, offset);
+    fprintf(stderr, "cbfuse_write path:%s size:%lu offset:%llu\n", path, size, offset);
 
     int fresult = write_data(_lcb_instance, path, buf, size, offset);
+    IfFRErrorGotoDoneWithRef(path);
+
+done:
+    return fresult;
+}
+
+// Change the permission bits of a file
+static int cbfuse_chmod(const char *path, mode_t mode)
+{
+    fprintf(stderr, "cbfuse_chmod path:%s mode:0x%04X\n", path, mode);
+
+    int fresult = update_stat_mode(_lcb_instance, path, mode);
+    IfFRErrorGotoDoneWithRef(path);
+
+done:
+    return fresult;
+}
+
+// Change the size of a file
+static int cbfuse_truncate(const char *path, off_t offset)
+{
+    fprintf(stderr, "cbfuse_truncate path:%s offset:%llu\n", path, offset);
+
+    int fresult = truncate_data(_lcb_instance, path, offset);
+    IfFRErrorGotoDoneWithRef(path);
+
+done:
+    return fresult;
+}
+
+// Change the access and modification times of a file with nanosecond resolution
+static int cbfuse_utimens(const char *path, const struct timespec tv[2])
+{
+    fprintf(stderr, "cbfuse_utimens path:%s", path);
+
+    int fresult = update_stat_utimens(_lcb_instance, path, tv);
     IfFRErrorGotoDoneWithRef(path);
 
 done:
@@ -262,14 +309,17 @@ done:
 ///// INITIALIZATION AND BOOTSTRAPPING
 
 static struct fuse_operations cb_filesystem_operations = {
-    .init    = cb_init,
-    .getattr = cb_getattr,
-    .open    = cb_open,
-    .create  = cb_create,
-    .unlink  = cb_unlink,
-    .read    = cb_read,
-    .readdir = cb_readdir,
-    .write   = cb_write,
+    .init     = cbfuse_init,
+    .getattr  = cbfuse_getattr,
+    .open     = cbfuse_open,
+    .create   = cbfuse_create,
+    .unlink   = cbfuse_unlink,
+    .read     = cbfuse_read,
+    .readdir  = cbfuse_readdir,
+    .write    = cbfuse_write,
+    .chmod    = cbfuse_chmod,
+    .truncate = cbfuse_truncate,
+    .utimens  = cbfuse_utimens
 };
 
 struct cbfuse_config {
@@ -418,7 +468,7 @@ int main(int argc, char **argv)
     ///// VERIFY OR INSTALL ROOT DIR
 
     struct stat root_stat;
-    int get_root_rc = cb_getattr(ROOT_DIR_STRING, &root_stat);
+    int get_root_rc = cbfuse_getattr(ROOT_DIR_STRING, &root_stat);
     if (get_root_rc == 0) {
         if (!S_ISDIR(root_stat.st_mode)) {
             // we received something but it's not a directory

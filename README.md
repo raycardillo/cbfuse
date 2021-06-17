@@ -48,7 +48,7 @@ If you're looking for an actual distributed file server built on top of Couchbas
   - https://www.couchbase.com/downloads
 - Install Couchbase C library
   - `brew install libcouchbase`
-  - IMPORTANT: You'll need v3.1.0 until the next 7.0 RC is released!!
+  - IMPORTANT: You'll need v3.1.0 until the next 7.0 RC is released!! ([more info](https://issues.couchbase.com/browse/JSCBC-890?jql=text%20~%20%22LCB_ERR_KVENGINE_INVALID_PACKET%22))
   - I installed v3.1.0 by downloading source and doing a manual build.
 - Install FUSE
   - `brew install macfuse`

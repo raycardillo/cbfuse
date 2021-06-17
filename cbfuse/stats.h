@@ -37,6 +37,8 @@ int get_stat(lcb_INSTANCE *instance, const char *pkey, cbfuse_stat *stat, uint64
 int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode);
 int remove_stat(lcb_INSTANCE *instance, const char *pkey);
 int update_stat_atime(lcb_INSTANCE *instance, const char *pkey);
+int update_stat_utimens(lcb_INSTANCE *instance, const char *pkey, const struct timespec tv[2]);
 int update_stat_size(lcb_INSTANCE *instance, const char *pkey, size_t size);
+int update_stat_mode(lcb_INSTANCE *instance, const char *pkey, mode_t mode);
 
 #endif /* !CBFUSE_STATS_HEADER_SEEN */

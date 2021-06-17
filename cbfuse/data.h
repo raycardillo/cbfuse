@@ -22,5 +22,6 @@
 int read_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t nbuf, off_t offset);
 int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t nbuf, off_t offset);
 int remove_data(lcb_INSTANCE *instance, const char *pkey);
+int truncate_data(lcb_INSTANCE *instance, const char *pkey, off_t offset);
 
 #endif /* !CBFUSE_BLOCKS_HEADER_SEEN */

@@ -9,6 +9,11 @@
         "unistd.h": "c",
         "stdlib.h": "c",
         "stdbool.h": "c",
-        "cbfuse.h": "c"
+        "cbfuse.h": "c",
+        "string.h": "c",
+        "stat.h": "c",
+        "types.h": "c",
+        "statvfs.h": "c",
+        "uio.h": "c"
     }
 }

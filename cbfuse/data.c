@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "stats.h"
 #include "util.h"
@@ -64,36 +65,50 @@ static int update_block(lcb_INSTANCE *instance, const char *pkey, __unused uint8
     int fresult = 0;
     sync_get_result *get_result = NULL;
     sync_store_result *store_result = NULL;
+    const bool isNotTruncate = (buf != NULL && nbuf > 0); 
 
-    // calculate the length of the date update operation
+    // calculate the overall length of the update operation
     size_t nupdate = offset + nbuf;
     IfTrueGotoDoneWithRef((nupdate > MAX_FILE_LEN), -EFBIG, pkey);
 
-    // get the current data for the block or allocate a new data block
+    // get the current data for the block
     fresult = get_block(instance, pkey, 1, &get_result);
     if (fresult == -ENOENT) {
-        // if the block wasn't found we need to create a new one
+        // if a block wasn't found:
+        // a) nothing to do if it's a truncate operation (no data provided)
+        // b) otherwise allocate memory to store the new data
+
         fresult = 0;
-        get_result->value = malloc(nupdate);
-        IfNULLGotoDoneWithRef(get_result->value, -ENOMEM, pkey);
-        get_result->nvalue = nupdate;
-        *new_block_size = nupdate;
+        if (isNotTruncate) {
+            get_result->value = malloc(nupdate);
+            IfNULLGotoDoneWithRef(get_result->value, -ENOMEM, pkey);
+            get_result->nvalue = nupdate;
+            *new_block_size = nupdate;
+        } else {
+            goto done;
+        }
+
     } else {
         IfFRErrorGotoDoneWithRef(pkey);
     }
 
-    // if we need more room then grow the buffer
-    if (nupdate > get_result->nvalue) {
-        void *new_data = memdupm(get_result->value, get_result->nvalue, nupdate);
-        IfNULLGotoDoneWithRef(get_result->value, -ENOMEM, pkey);
-        free((void*)(get_result->value));
-        get_result->value = new_data;
-        get_result->nvalue = nupdate;
-        *new_block_size = nupdate;
-    }
+    if (isNotTruncate) {
+        // if we need more room then grow the buffer
+        if (nupdate > get_result->nvalue) {
+            void *new_data = memdupm(get_result->value, get_result->nvalue, nupdate);
+            IfNULLGotoDoneWithRef(get_result->value, -ENOMEM, pkey);
+            free((void*)(get_result->value));
+            get_result->value = new_data;
+            get_result->nvalue = nupdate;
+            *new_block_size = nupdate;
+        }
 
-    // modify the data as instructed
-    memcpy((void*)((get_result->value)+offset), buf, nbuf);
+        // modify the data as instructed
+        memcpy((void*)((get_result->value)+offset), buf, nbuf);
+    } else {
+        // no need to allocate and copy - just truncate the size of the data
+        get_result->nvalue = offset;
+    }
 
     // now write the data back to Couchbase
 
@@ -178,6 +193,7 @@ int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t
     int fresult = 0;
 
     // TODO: Refactor to support multiple data blocks
+
     IfTrueGotoDoneWithRef((offset + nbuf > MAX_FILE_LEN), -EFBIG, pkey);
 
     size_t new_block_size = 0;
@@ -230,5 +246,36 @@ int remove_data(lcb_INSTANCE *instance, const char *pkey)
 
 done:
     sync_remove_destroy(result);
+    return fresult;
+}
+
+int truncate_data(lcb_INSTANCE *instance, const char *pkey, off_t offset)
+{
+    int fresult = 0;
+
+    // NOTE:
+    // Strategy here is just to truncate existing data if smaller.
+    // If larger, we just want to verify upper limit is available
+    // because it doesn't make sense to re-write the blocks here.
+    // New blocks will just be allocated on future writes, and the
+    // writes are configured to support FUSE_CAP_BIG_WRITES writes.
+
+    // TODO: Refactor to support multiple data blocks
+
+    if (offset == 0) {
+        // truncating to zero is equivalent to removing all data for the file
+        fresult = remove_data(instance, pkey);
+    } else {
+        // otherwise update the block with no data (indicating a truncate)
+        fresult = update_block(instance, pkey, 1, NULL, 0, offset, NULL);
+    }
+    IfFRErrorGotoDoneWithRef(pkey);
+
+    // now update the file size
+    fresult = update_stat_size(instance, pkey, offset);
+    IfFRErrorGotoDoneWithRef(pkey);
+
+done:
+    //fprintf(stderr, ">> truncate_data done: pkey:%s fr:%d\n", pkey, fresult);
     return fresult;
 }
