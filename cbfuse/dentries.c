@@ -27,7 +27,7 @@
 #include "sync_store.h"
 #include "sync_remove.h"
 
-int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_json)
+int get_dentry_json(lcb_INSTANCE *instance, const char *dir_pkey, cJSON **dentry_json)
 {
     int fresult = 0;
     sync_get_result *result = NULL;
@@ -44,7 +44,7 @@ int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_jso
         DENTRIES_COLLECTION_STRING, DENTRIES_COLLECTION_STRLEN);
     IfLCBFailGotoDone(rc, -EIO);
 
-    rc = lcb_cmdget_key(cmd, pkey, strlen(pkey));
+    rc = lcb_cmdget_key(cmd, dir_pkey, strlen(dir_pkey));
     IfLCBFailGotoDone(rc, -EIO);
 
     rc = sync_get(instance, cmd, &result);
@@ -53,10 +53,10 @@ int get_dentry_json(lcb_INSTANCE *instance, const char *pkey, cJSON **dentry_jso
     IfLCBFailGotoDone(rc, -EIO);
 
     // now check the actual result status
-    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, pkey);
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, dir_pkey);
 
     *dentry_json = cJSON_ParseWithLength(result->value, result->nvalue);
-    IfNULLGotoDoneWithRef(dentry_json, -EIO, pkey);
+    IfNULLGotoDoneWithRef(dentry_json, -EIO, dir_pkey);
 
 done:
     sync_get_destroy(result);
@@ -129,7 +129,6 @@ int add_new_dentry(lcb_INSTANCE *instance, const char *dir_pkey, const char *dir
     lcb_STATUS rc;
     lcb_CMDSTORE *cmd;
 
-    // insert only if key doesn't already exist
     rc = lcb_cmdstore_create(&cmd, LCB_STORE_INSERT);
     IfLCBFailGotoDone(rc, -EIO);
 
@@ -212,6 +211,39 @@ int add_child_to_dentry(lcb_INSTANCE *instance, const char *dir_pkey, const char
 done:
     cJSON_Delete(dentry_json);
     sync_store_destroy(result);
+    return fresult;
+}
+
+int remove_dentry(lcb_INSTANCE *instance, const char *dir_pkey)
+{
+    int fresult = 0;
+    sync_remove_result *result = NULL;
+
+    lcb_STATUS rc;
+    lcb_CMDREMOVE *cmd;
+
+    rc = lcb_cmdremove_create(&cmd);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdremove_collection(
+        cmd,
+        DEFAULT_SCOPE_STRING, DEFAULT_SCOPE_STRLEN,
+        DENTRIES_COLLECTION_STRING, DENTRIES_COLLECTION_STRLEN);
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = lcb_cmdremove_key(cmd, dir_pkey, strlen(dir_pkey));
+    IfLCBFailGotoDone(rc, -EIO);
+
+    rc = sync_remove(instance, cmd, &result);
+
+    // first check the sync command result code
+    IfLCBFailGotoDone(rc, -EIO);
+
+    // now check the actual result status
+    IfLCBFailGotoDoneWithRef(result->status, -ENOENT, dir_pkey);
+
+done:
+    sync_remove_destroy(result);
     return fresult;
 }
 

@@ -224,7 +224,6 @@ int remove_data(lcb_INSTANCE *instance, const char *pkey)
     lcb_STATUS rc;
     lcb_CMDREMOVE *cmd;
 
-    // insert only if key doesn't already exist
     rc = lcb_cmdremove_create(&cmd);
     IfLCBFailGotoDone(rc, -EIO);
 

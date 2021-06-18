@@ -104,7 +104,6 @@ int insert_stat(lcb_INSTANCE *instance, const char *pkey, mode_t mode)
     lcb_STATUS rc;
     lcb_CMDSTORE *cmd;
 
-    // insert only if key doesn't already exist
     rc = lcb_cmdstore_create(&cmd, LCB_STORE_INSERT);
     IfLCBFailGotoDone(rc, -EIO);
 
@@ -144,7 +143,6 @@ int remove_stat(lcb_INSTANCE *instance, const char *pkey)
     lcb_STATUS rc;
     lcb_CMDREMOVE *cmd;
 
-    // insert only if key doesn't already exist
     rc = lcb_cmdremove_create(&cmd);
     IfLCBFailGotoDone(rc, -EIO);
 

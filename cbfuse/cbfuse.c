@@ -199,10 +199,16 @@ static int cbfuse_unlink(const char *path)
 
     // TODO: These operations can be in a transaction or at least scheduled as a batch
 
-    // Only check the stat operation - others can fail silently and may be useful for error recovery
+    // remove any data for the file
     fresult = remove_data(_lcb_instance, path);
+
+    // remove the file from the parent directory entry
     fresult = remove_child_from_dentry(_lcb_instance, dname, bname);
+
+    // remove the stat entry for the file
     fresult = remove_stat(_lcb_instance, path);
+
+    // Only check the stat operation - others can fail silently and may be useful for error recovery
     IfFRErrorGotoDoneWithRef(path);
 
 done:
@@ -244,6 +250,8 @@ static int cbfuse_read(const char *path, char *buf, size_t size, off_t offset, _
 {
     fprintf(stderr, "cbfuse_read path:%s size:%lu offset:%llu\n", path, size, offset);
 
+    // TODO: the underlying CB write operation can benefit from streaming/buffering
+    
     int fresult = read_data(_lcb_instance, path, buf, size, offset);
     IfFRErrorGotoDoneWithRef(path);
 
@@ -255,6 +263,8 @@ done:
 static int cbfuse_write(const char *path, const char *buf, size_t size, off_t offset, __unused struct fuse_file_info *fi)
 {
     fprintf(stderr, "cbfuse_write path:%s size:%lu offset:%llu\n", path, size, offset);
+
+    // TODO: the underlying CB write operation can benefit from streaming/buffering
 
     int fresult = write_data(_lcb_instance, path, buf, size, offset);
     IfFRErrorGotoDoneWithRef(path);
@@ -324,13 +334,53 @@ static int cbfuse_mkdir(const char * path, mode_t mode)
 
     // TODO: These operations can be in a transaction or at least scheduled as a batch
 
+    // add stat info for the entry
     fresult = insert_stat(_lcb_instance, path, mode);
     IfFRErrorGotoDoneWithRef(path);
 
+    // add a new directory entry
     fresult = add_new_dentry(_lcb_instance, path, path, dname);
     IfFRErrorGotoDoneWithRef(path);
 
+    // add the new directory to the parent directory entry
     fresult = add_child_to_dentry(_lcb_instance, dname, bname);
+    IfFRErrorGotoDoneWithRef(path);
+
+done:
+    free(dirstr);
+    free(basestr);
+    return fresult;
+}
+
+static int cbfuse_rmdir(const char * path)
+{
+    fprintf(stderr, "cbfuse_unlink path:%s\n", path);
+
+    int fresult = 0;
+
+    char *dirstr = strdup(path);
+    char *basestr = strdup(path);
+    char *dname = dirname(dirstr);
+    char *bname = basename(basestr);
+
+    IfTrueGotoDoneWithRef(
+        (dname == NULL || bname == NULL),
+        -ENOENT,
+        path
+    );
+
+    // TODO: These operations can be in a transaction or at least scheduled as a batch
+
+    // remove the directory entry
+    fresult = remove_dentry(_lcb_instance, path);
+
+    // remove the directory from the parent directory entry
+    fresult = remove_child_from_dentry(_lcb_instance, dname, bname);
+
+    // remove stat info for the directory
+    fresult = remove_stat(_lcb_instance, path);
+
+    // Only check the stat operation - others can fail silently and may be useful for error recovery
     IfFRErrorGotoDoneWithRef(path);
 
 done:
@@ -358,18 +408,19 @@ done:
 ///// INITIALIZATION AND BOOTSTRAPPING
 
 static struct fuse_operations cb_filesystem_operations = {
-    .init     = cbfuse_init,
-    .getattr  = cbfuse_getattr,
-    .open     = cbfuse_open,
-    .create   = cbfuse_create,
-    .unlink   = cbfuse_unlink,
-    .read     = cbfuse_read,
-    .readdir  = cbfuse_readdir,
-    .write    = cbfuse_write,
-    .chmod    = cbfuse_chmod,
-    .truncate = cbfuse_truncate,
-    .utimens  = cbfuse_utimens,
-    .mkdir    = cbfuse_mkdir
+    .init       = cbfuse_init,
+    .getattr    = cbfuse_getattr,
+    .open       = cbfuse_open,
+    .create     = cbfuse_create,
+    .unlink     = cbfuse_unlink,
+    .read       = cbfuse_read,
+    .readdir    = cbfuse_readdir,
+    .write      = cbfuse_write,
+    .chmod      = cbfuse_chmod,
+    .truncate   = cbfuse_truncate,
+    .utimens    = cbfuse_utimens,
+    .mkdir      = cbfuse_mkdir,
+    .rmdir      = cbfuse_rmdir
 };
 
 struct cbfuse_config {
