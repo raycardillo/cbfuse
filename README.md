@@ -1,7 +1,15 @@
 cbfuse
 ======
 
-This is currently just a fun/academic/experimental project that I started to help me learn more about FUSE and to gain some first hand experience with libcouchbase (the C SDK for Couchbase) after seeing all the new features coming in [Couchbase Server 7.0](https://www.couchbase.com/products/server). The idea is to use a Couchbase Server as a distributed file store that presents itself as a local user based file system using [FUSE](https://github.com/libfuse/libfuse). However, I wasn't super focused on efficient file system design, have not put much thought into key access patterns, nor have I worried about distributed locks, etc. Those topics would have to be addressed for this to be a more robust and useful distributed filesystem.
+[![Project license](https://img.shields.io/badge/license-Apache%202.0-informational)](https://www.apache.org/licenses/LICENSE-2.0)
+
+An academic exercise that implements a FUSE file-system using Couchbase as the data store.
+
+----------
+
+This is currently just a fun/academic/experimental project that I started to help me learn more about FUSE and to gain some first hand experience with [libcouchbase](https://github.com/couchbase/libcouchbase) (the C SDK for Couchbase) after seeing all of the new and exciting features coming in [Couchbase Server 7.0](https://www.couchbase.com/products/server).
+
+The idea is to use Couchbase Server as a distributed data store for a user based file system using [FUSE](https://github.com/libfuse/libfuse). Because this was just a fun exercise, I wasn't _super focused_ on efficient file system design, I have not put much thought into optimizing key access patterns, nor have I worried about distributed locks, CAS, etc. It would also be better to optimize the network access using transactions or batch operations. Those topics should be addressed for this to be a more robust and useful distributed filesystem.
 
 If you're looking for an actual distributed file server built on top of Couchbase, check out [cbfs](https://github.com/couchbaselabs/cbfs) on [CouchbaseLabs](https://github.com/couchbaselabs) instead. 
 
@@ -72,10 +80,11 @@ If you're looking for an actual distributed file server built on top of Couchbas
 - Setup Couchbase
   - Start the Couchbase server
   - Create a bucket (e.g., `cbfuse`)
-  - Under the `_default` **Scope**, add the following **Collections**:
-    - `stats` - _used for basic file stat attributes_
-    - `blocks` - _used to store file data blocks_
-    - `dentries` - _used to store directory entry info_
+  - See `./scripts/setup.sh` which does the following in `cbfuse`:
+    - Under the `_default` **Scope**, add **Collection**s:
+      - `stats` - _used for basic file stat attributes_
+      - `blocks` - _used to store file data blocks_
+      - `dentries` - _used to store directory entry info_
 - Running a quick debug test
   - _This filesystem runs in the **foreground** and is **single-threaded**._
   - Mount the filesystem

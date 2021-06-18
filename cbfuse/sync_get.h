@@ -1,4 +1,5 @@
 /*
+ * cbfuse implements a FUSE file-system using Couchbase as the data store.
  * Copyright (c) 2021 Raymond Cardillo
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
