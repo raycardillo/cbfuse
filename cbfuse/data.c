@@ -141,7 +141,13 @@ static int update_block(lcb_INSTANCE *instance, const char *pkey, __unused uint8
     IfLCBFailGotoDone(rc, -EIO);
 
     // now check the actual result status
-    IfLCBFailGotoDoneWithRef(store_result->status, -ENOENT, pkey);
+    if (store_result->status == LCB_SUCCESS) {
+        fresult = 0;
+    } else if (store_result->status == LCB_ERR_DOCUMENT_NOT_FOUND) {
+        fresult = -ENOENT;
+    } else {
+        fresult = -EIO;
+    }
 
     // TODO: retry if fail due to CAS (could also considering locking semantics with CAS to prevent this
 
@@ -185,6 +191,10 @@ int read_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t 
     fresult = nbuf;
 
 done:
+    if (fresult < 0) {
+        // read must return 0 on EOF or -1 when an error happens
+        fresult = -1;
+    }
     sync_get_destroy(get_result);
     return fresult;
 }
@@ -194,6 +204,11 @@ int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t
     int fresult = 0;
 
     // TODO: Refactor to support multiple data blocks
+
+    // TODO: Improve write performance
+    // Current strategy is pretty bad because it's fetching the current block and then making changes and rewriting.
+    // Even with FUSE_CAP_BIG_WRITES it ends up being too chatty because we're limited to the kernel read/write
+    // buffer size (e.g., 64k on macOS).
 
     IfTrueGotoDoneWithRef((offset + nbuf > MAX_FILE_LEN), -EFBIG, pkey);
 
@@ -210,7 +225,10 @@ int write_data(lcb_INSTANCE *instance, const char *pkey, const char *buf, size_t
     fresult = nbuf;
 
 done:
-    //fprintf(stderr, ">> write_data done: pkey:%s fr:%d\n", pkey, fresult);
+    if (fresult < 0) {
+        // write must return -1 when an error happens
+        fresult = -1;
+    }
     return fresult;
 }
 

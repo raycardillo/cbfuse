@@ -56,8 +56,14 @@ static void *cbfuse_init(__unused struct fuse_conn_info *conn)
 {
     fprintf(stderr, "cbfuse_init\n");
 
-    conn->async_read = false;
+    // it would be nice if we can read/write in one server call but
+    // we end up being limited by the kernel max read/write buffer
+    // which is currently 64k on mac for example.
+    conn->max_readahead = MAX_DOC_LEN;
+    conn->max_write = MAX_DOC_LEN;
     conn->want |= FUSE_CAP_BIG_WRITES;
+
+    conn->async_read = false;
 
     return NULL;
 }
@@ -251,12 +257,8 @@ static int cbfuse_read(const char *path, char *buf, size_t size, off_t offset, _
     fprintf(stderr, "cbfuse_read path:%s size:%lu offset:%llu\n", path, size, offset);
 
     // TODO: the underlying CB write operation can benefit from streaming/buffering
-    
-    int fresult = read_data(_lcb_instance, path, buf, size, offset);
-    IfFRErrorGotoDoneWithRef(path);
 
-done:
-    return fresult;
+    return read_data(_lcb_instance, path, buf, size, offset);
 }
 
 // Write data to an open file
@@ -266,11 +268,7 @@ static int cbfuse_write(const char *path, const char *buf, size_t size, off_t of
 
     // TODO: the underlying CB write operation can benefit from streaming/buffering
 
-    int fresult = write_data(_lcb_instance, path, buf, size, offset);
-    IfFRErrorGotoDoneWithRef(path);
-
-done:
-    return fresult;
+    return write_data(_lcb_instance, path, buf, size, offset);
 }
 
 // Change the permission bits of a file
