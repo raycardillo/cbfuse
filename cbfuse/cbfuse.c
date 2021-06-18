@@ -43,7 +43,6 @@ static lcb_INSTANCE *_lcb_instance = NULL;
 
 /////
 
-__unused
 static void open_callback(__unused lcb_INSTANCE *instance, lcb_STATUS rc)
 {
     fprintf(stderr, "open bucket: %s\n", lcb_strerror_short(rc));
@@ -143,18 +142,15 @@ done:
 // Create and open a file
 static int cbfuse_create(const char *path, mode_t mode, __unused struct fuse_file_info *fi)
 {
-    fprintf(stderr, "cbfuse_create path:%s mode:0x%02x\n", path, mode);
+    fprintf(stderr, "cbfuse_create path:%s mode:0x%02X\n", path, mode);
 
     int fresult = 0;
-
-    size_t npath = strlen(path);
-    IfTrueGotoDoneWithRef((npath > MAX_PATH_LEN), ENAMETOOLONG, path);
 
     char *dirstr = strdup(path);
     char *basestr = strdup(path);
     char *dname = dirname(dirstr);
     char *bname = basename(basestr);
-
+    
     IfTrueGotoDoneWithRef(
         (dname == NULL || bname == NULL),
         -ENOENT,
@@ -167,6 +163,9 @@ static int cbfuse_create(const char *path, mode_t mode, __unused struct fuse_fil
         path
     );
 
+    size_t npath = strlen(path);
+    IfTrueGotoDoneWithRef((npath > MAX_PATH_LEN), ENAMETOOLONG, path);
+
     fresult = insert_stat(_lcb_instance, path, mode);
     IfFRErrorGotoDoneWithRef(path);
 
@@ -174,6 +173,8 @@ static int cbfuse_create(const char *path, mode_t mode, __unused struct fuse_fil
     IfFRErrorGotoDoneWithRef(path);
 
 done:
+    free(dirstr);
+    free(basestr);
     return fresult;
 }
 
@@ -189,6 +190,12 @@ static int cbfuse_unlink(const char *path)
     char *dname = dirname(dirstr);
     char *bname = basename(basestr);
 
+    IfTrueGotoDoneWithRef(
+        (dname == NULL || bname == NULL),
+        -ENOENT,
+        path
+    );
+
     // TODO: These operations can be in a transaction or at least scheduled as a batch
 
     // Only check the stat operation - others can fail silently and may be useful for error recovery
@@ -198,6 +205,8 @@ static int cbfuse_unlink(const char *path)
     IfFRErrorGotoDoneWithRef(path);
 
 done:
+    free(dirstr);
+    free(basestr);
     return fresult;
 }
 
@@ -289,9 +298,48 @@ done:
     return fresult;
 }
 
+static int cbfuse_mkdir(const char * path, mode_t mode)
+{
+    fprintf(stderr, "cbfuse_mkdir path:%s mode:0x%02X\n", path, mode);
+
+    int fresult = 0;
+
+    char *dirstr = strdup(path);
+    char *basestr = strdup(path);
+    char *dname = dirname(dirstr);
+    char *bname = basename(basestr);
+
+    IfTrueGotoDoneWithRef(
+        (dname == NULL || bname == NULL),
+        -ENOENT,
+        path
+    );
+
+    IfFalseGotoDoneWithRef(
+        (mode|S_IFDIR),
+        -EINVAL,
+        path
+    );
+
+    // TODO: These operations can be in a transaction or at least scheduled as a batch
+
+    fresult = insert_stat(_lcb_instance, path, mode);
+    IfFRErrorGotoDoneWithRef(path);
+
+    fresult = add_new_dentry(_lcb_instance, path, path, dname);
+    IfFRErrorGotoDoneWithRef(path);
+
+    fresult = add_child_to_dentry(_lcb_instance, dname, bname);
+    IfFRErrorGotoDoneWithRef(path);
+
+done:
+    free(dirstr);
+    free(basestr);
+    return fresult;
+}
+
 /////
 
-__unused
 static int insert_root(lcb_INSTANCE *instance) {
     // TODO: Consider refactoring to C++ to take advantage of transaction context with multiple ops
 
@@ -299,7 +347,7 @@ static int insert_root(lcb_INSTANCE *instance) {
     int fresult = insert_stat(instance, ROOT_DIR_STRING, (S_IFDIR | 0755));
     IfFRErrorGotoDoneWithRef(ROOT_DIR_STRING);
 
-    fresult = insert_root_dentry(instance);
+    fresult = add_new_dentry(instance, ROOT_DIR_STRING, ROOT_DIR_STRING, NULL);
     IfFRErrorGotoDoneWithRef(ROOT_DIR_STRING);
 
 done:
@@ -319,7 +367,8 @@ static struct fuse_operations cb_filesystem_operations = {
     .write    = cbfuse_write,
     .chmod    = cbfuse_chmod,
     .truncate = cbfuse_truncate,
-    .utimens  = cbfuse_utimens
+    .utimens  = cbfuse_utimens,
+    .mkdir    = cbfuse_mkdir
 };
 
 struct cbfuse_config {

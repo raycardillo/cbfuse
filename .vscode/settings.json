@@ -14,6 +14,7 @@
         "stat.h": "c",
         "types.h": "c",
         "statvfs.h": "c",
-        "uio.h": "c"
+        "uio.h": "c",
+        "common.h": "c"
     }
 }

@@ -40,8 +40,8 @@ extern const size_t  DENTRIES_COLLECTION_STRLEN;
 extern const char    BLOCKS_COLLECTION_STRING[];
 extern const size_t  BLOCKS_COLLECTION_STRLEN;
 
-extern const char    DENTRY_CURRENT[];
-extern const char    DENTRY_PARENT[];
+extern const char    DENTRY_DIR_PATH[];
+extern const char    DENTRY_PAR_PATH[];
 extern const char    DENTRY_CHILDREN[];
 
 #endif /* !CBFUSE_COMMON_HEADER_SEEN */
